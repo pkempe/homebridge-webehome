@@ -1,8 +1,8 @@
 {
   "private": true,
-  "displayName": "Plugin Name",
-  "name": "homebridge-plugin-name",
-  "version": "1.0.0",
+  "displayName": "WeBeHome Full",
+  "name": "homebridge-webehome-full",
+  "version": "0.0.1",
   "description": "A short description about what your plugin does.",
   "license": "Apache-2.0",
   "repository": {
@@ -26,9 +26,12 @@
   "keywords": [
     "homebridge-plugin"
   ],
-  "dependencies": {},
+  "dependencies": {
+    "node-fetch": "^2.6.12"
+  },
   "devDependencies": {
     "@types/node": "^16.10.9",
+    "@types/node-fetch": "^2.6.4",
     "@typescript-eslint/eslint-plugin": "^5.0.0",
     "@typescript-eslint/parser": "^5.0.0",
     "eslint": "^8.0.1",

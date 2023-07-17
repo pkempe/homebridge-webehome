@@ -100,7 +100,7 @@ export class SensorAccessory {
         this.platform.Characteristic.ContactSensorState.CONTACT_DETECTED;
       }
 
-      this.platform.log.debug('Current state of the contact sensor', this.sensor.name, 'is:', isOpen ? 'OPEN' : 'CLOSED');
+      // this.platform.log.debug('Current state of the contact sensor', this.sensor.name, 'is:', isOpen ? 'OPEN' : 'CLOSED');
     }
 
     // return the current value to Homebridge
@@ -120,7 +120,7 @@ export class SensorAccessory {
     }
 
     // Log the current motion detected state
-    this.platform.log.debug('Current state of the motion sensor is:', isMotionDetected ? 'DETECTED' : 'NOT DETECTED');
+    // this.platform.log.debug('Current state of the motion sensor is:', isMotionDetected ? 'DETECTED' : 'NOT DETECTED');
 
     // you should always call the callback function, even if there was an error, but pass it as the first argument to the function
     callback(null, isMotionDetected);
@@ -140,8 +140,8 @@ export class SensorAccessory {
     }
 
     // Log the current smoke detected state
-    this.platform.log.debug('Current state of the smoke sensor', this.sensor.name, 'is:',
-      isSmokeDetected ? 'SMOKE DETECTED' : 'SMOKE NOT DETECTED');
+    // this.platform.log.debug('Current state of the smoke sensor', this.sensor.name, 'is:',
+    // isSmokeDetected ? 'SMOKE DETECTED' : 'SMOKE NOT DETECTED');
 
     // you should always call the callback function, even if there was an error, but pass it as the first argument to the function
     callback(null, isSmokeDetected);
@@ -158,7 +158,10 @@ export class SensorAccessory {
       this.updateSensor(sensorData);
       isLowBattery = this.sensor.hasLowBattery();
 
-      this.platform.log.debug('Current battery status of the sensor', this.sensor.name, 'is:', isLowBattery ? 'LOW' : 'NORMAL');
+      if (isLowBattery) {
+        this.platform.log.info(this.sensor.name, 'has low battery');
+      }
+      // this.platform.log.debug('Current battery status of the sensor', this.sensor.name, 'is:', isLowBattery ? 'LOW' : 'NORMAL');
     }
 
     callback(null, isLowBattery ?

@@ -7,13 +7,14 @@
     "properties": {
       "login": {
         "title": "Username",
-        "type": "string"
+        "type": "string",
+        "required": true
       },
       "password": {
         "title": "Password",
-        "type": "string"
+        "type": "string",
+        "required": true
       }
-    },
-    "required": ["login", "password"]
+    }
   }
 }

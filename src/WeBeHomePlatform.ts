@@ -1,9 +1,11 @@
-import { API, DynamicPlatformPlugin, Logger, PlatformAccessory, PlatformConfig, Service, Characteristic } from 'homebridge';
+import { API, DynamicPlatformPlugin, Logger,
+  PlatformAccessory, PlatformConfig, Service, Characteristic, CharacteristicSetCallback } from 'homebridge';
 
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings';
 import { SensorAccessory } from './SensorAccessory';
-import { WeBeHomeAPI } from './WeBeHomeAPI';
+import { SecuritySystemData, WeBeHomeAPI } from './WeBeHomeAPI';
 import { Sensor, SensorCategory, SensorData, TitleKey, parseAllDeviceData } from './WeBeHomeSensor';
+import { SecuritySystemAccessory } from './SecuritySystemAccessory';
 
 /**
  * HomebridgePlatform
@@ -34,7 +36,8 @@ export class WeBeHome implements DynamicPlatformPlugin {
     this.api.on('didFinishLaunching', () => {
       log.debug('Executed didFinishLaunching callback');
       // run the method to discover / register your devices as accessories
-      this.discoverDevices();
+      this.discoverSensors();
+      this.discoverSecuritySystem();
     });
   }
 
@@ -54,11 +57,17 @@ export class WeBeHome implements DynamicPlatformPlugin {
    * Accessories must only be registered once, previously created accessories
    * must not be registered again to prevent "duplicate UUID" errors.
    */
-  async discoverDevices() {
+  async discoverSensors() {
 
+    // Setup the sensors
     try {
       // Fetch the status from the server
       const data = await this.webehomeapi.fetchStatus();
+
+      if (data === null) {
+        this.log.warn('Could not fetch data from server. No sensors will be discovered.');
+        return;
+      }
 
       // Parse the server response into an array of device data objects
       const deviceDataArray = parseAllDeviceData(data);
@@ -86,7 +95,7 @@ export class WeBeHome implements DynamicPlatformPlugin {
         const existingAccessory = this.accessories.find(accessory => accessory.UUID === uuid);
         if (existingAccessory) {
           // the accessory already exists
-          this.log.debug('Restoring existing accessory from cache:', existingAccessory.displayName);
+          // this.log.debug('Restoring existing accessory from cache:', existingAccessory.displayName);
 
           // create the accessory handler for the restored accessory
           // this is imported from `platformAccessory.ts`
@@ -114,15 +123,69 @@ export class WeBeHome implements DynamicPlatformPlugin {
         }
       }
 
+      this.log.info('Did finish setting up', sensors.length, 'sensors');
+
     } catch (error) {
       this.log.error('Failed to fetch status:', error);
     }
   }
 
+  async discoverSecuritySystem() {
+    // Setup the security system
+    try {
+      // Fetch the status from the server
+      const statusDict = await this.webehomeapi.fetchSecuritySystemStatus();
+
+      // Set up security system
+
+      // create a new accessory
+      const name = 'Security system';
+      const uuid = this.api.hap.uuid.generate(statusDict.uuid);
+      // const accessory = new this.api.platformAccessory(name, uuid);
+
+      const existingAccessory = this.accessories.find(accessory => accessory.UUID === uuid);
+      if (existingAccessory) {
+        // the accessory already exists
+        // this.log.debug('Restoring existing accessory from cache:', existingAccessory.displayName);
+
+        // create the accessory handler for the restored accessory
+        const securitySystem = new SecuritySystemAccessory(this, existingAccessory, statusDict);
+
+        this.log.debug('Security system:', statusDict);
+        securitySystem.updateStatus(statusDict);
+
+      } else {
+        // the accessory does not yet exist, so we need to create it
+        this.log.info('Adding new accessory:', name);
+
+        // create a new accessory
+        const accessory = new this.api.platformAccessory(name, uuid);
+
+        // store a copy of the device object in the `accessory.context`
+        // the `context` property can be used to store any data about the accessory you may need
+        accessory.context.device = statusDict;
+
+        // create the accessory handler for the newly create accessory
+        // this is imported from `platformAccessory.ts`
+        new SecuritySystemAccessory(this, accessory, statusDict);
+
+        // link the accessory to your platform
+        this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
+      }
+
+    } catch (error) {
+      this.log.error('Failed to fetch status:', error);
+    }
+  }
 
   async fetchStatusForSensor(suid: number): Promise<SensorData | null> {
     // Fetch the status from the server
     const data = await this.webehomeapi.fetchStatus();
+
+    if (data === null) {
+      this.log.warn(`No data fetched for sensor ${suid}`);
+      return null;
+    }
 
     // Parse the server response into an array of device data objects
     const deviceDataArray = parseAllDeviceData(data);
@@ -131,6 +194,16 @@ export class WeBeHome implements DynamicPlatformPlugin {
     const sensorData = deviceDataArray.find(deviceData => parseInt(deviceData[TitleKey.SUID] || '0') === suid);
 
     return sensorData || null;
+  }
+
+  async fetchStatusForSecuritySystem(): Promise<SecuritySystemData | null > {
+    // Fetch the status from the server
+    const data = await this.webehomeapi.fetchSecuritySystemStatus();
+    return data;
+  }
+
+  async setStateForSecuritySystem(action: string, callback: CharacteristicSetCallback) {
+    await this.webehomeapi.setSecuritySystemTargetState(action, callback);
   }
 
 }

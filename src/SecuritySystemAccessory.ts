@@ -1,4 +1,4 @@
-import type { CharacteristicGetCallback, CharacteristicSetCallback, CharacteristicValue, PlatformAccessory, Service } from 'homebridge';
+import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge';
 import { WeBeHome } from './WeBeHomePlatform';
 
 export type SecuritySystemData = {
@@ -28,10 +28,12 @@ export class SecuritySystemAccessory {
   ) {
 
     this.statusDict = statusDict;
-    this.accessory.context = statusDict;
+    this.accessory.context.securitySystem = true;
+    this.accessory.context.device = statusDict;
 
     this.accessory.getService(this.platform.Service.AccessoryInformation)!
-      .setCharacteristic(this.platform.Characteristic.Manufacturer, 'WeBeHome');
+      .setCharacteristic(this.platform.Characteristic.Manufacturer, 'WeBeHome')
+      .setCharacteristic(this.platform.Characteristic.SerialNumber, statusDict.uuid);
 
     let serviceExists = false;
 
@@ -43,45 +45,52 @@ export class SecuritySystemAccessory {
     }
 
     this.service.getCharacteristic(this.platform.Characteristic.SecuritySystemCurrentState)
-      .on('get', this.handleSecuritySystemStateGet.bind(this));
+      .onGet(this.handleSecuritySystemStateGet.bind(this));
     this.service.getCharacteristic(this.platform.Characteristic.SecuritySystemTargetState)
-      .on('set', this.handleSecuritySystemStateSet.bind(this));
+      .onGet(this.handleSecuritySystemTargetStateGet.bind(this))
+      .onSet(this.handleSecuritySystemStateSet.bind(this));
 
     // Only add the service to the accessory if it didn't exist already
     if (!serviceExists) {
       this.accessory.addService(this.service);
     }
 
+    this.updateStatus(statusDict);
+
   }
 
   updateStatus(data: SecuritySystemData) {
-    this.statusDict.status = data.status;
+    this.statusDict = data;
+    this.accessory.context.securitySystem = true;
+    this.accessory.context.device = data;
+
+    const currentState = this.mapServerStateToHomebridgeState(data.status);
+    this.service.updateCharacteristic(this.platform.Characteristic.SecuritySystemCurrentState, currentState);
+    this.service.updateCharacteristic(this.platform.Characteristic.SecuritySystemTargetState,
+      this.mapServerStateToHomebridgeTargetState(data.status));
   }
 
-  async handleSecuritySystemStateGet(callback: CharacteristicGetCallback) {
-
+  handleSecuritySystemStateGet(): CharacteristicValue {
     try {
-      const statusData = await this.platform.fetchStatusForSecuritySystem();
-      if (!statusData) {
-        throw new Error('No security system status was returned');
-      }
-
-      this.updateStatus(statusData);
-      const state = this.mapServerStateToHomebridgeState(statusData.status);
-
-      this.service.updateCharacteristic(this.platform.Characteristic.SecuritySystemCurrentState,
-        state);
-
+      const state = this.mapServerStateToHomebridgeState(this.statusDict.status);
       this.platform.log.debug('Current state of security system:', state);
-      callback(null, state);
+      return state;
     } catch (error) {
       this.platform.log.error('Failed to get security system state:', error);
-      callback(error as Error);
+      throw this.communicationError();
     }
-
   }
 
-  async handleSecuritySystemStateSet(newValue: CharacteristicValue, callback: CharacteristicSetCallback) {
+  handleSecuritySystemTargetStateGet(): CharacteristicValue {
+    try {
+      return this.mapServerStateToHomebridgeTargetState(this.statusDict.status);
+    } catch (error) {
+      this.platform.log.error('Failed to get security system target state:', error);
+      throw this.communicationError();
+    }
+  }
+
+  async handleSecuritySystemStateSet(newValue: CharacteristicValue): Promise<void> {
     try {
       if (typeof newValue !== 'number') {
         throw new Error(`Invalid target state: ${newValue}`);
@@ -89,10 +98,11 @@ export class SecuritySystemAccessory {
 
       const action = this.mapTargetStateToAction(newValue);
       await this.platform.setStateForSecuritySystem(action);
-      callback();
+      this.service.updateCharacteristic(this.platform.Characteristic.SecuritySystemTargetState, newValue);
+      await this.platform.refreshSecuritySystem();
     } catch (error) {
       this.platform.log.error('Failed to set security system state:', error);
-      callback(error as Error);
+      throw this.communicationError();
     }
 
   }
@@ -129,6 +139,20 @@ export class SecuritySystemAccessory {
     }
   }
 
+  mapServerStateToHomebridgeTargetState(serverState: string): number {
+    switch(serverState) {
+      case ServerState.StayArm:
+        return this.platform.Characteristic.SecuritySystemTargetState.STAY_ARM;
+      case ServerState.AwayArm:
+      case ServerState.AlarmTriggered:
+        return this.platform.Characteristic.SecuritySystemTargetState.AWAY_ARM;
+      case ServerState.Disarmed:
+        return this.platform.Characteristic.SecuritySystemTargetState.DISARM;
+      default:
+        throw new Error(`Invalid server state: ${serverState}`);
+    }
+  }
+
   mapTargetStateToAction(targetState: number): string {
     if (targetState === this.platform.Characteristic.SecuritySystemTargetState.DISARM) {
       return 'disarm';
@@ -142,6 +166,10 @@ export class SecuritySystemAccessory {
     } else {
       throw new Error(`Invalid target state: ${targetState}`);
     }
+  }
+
+  private communicationError(): Error {
+    return new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
   }
 
 }

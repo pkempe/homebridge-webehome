@@ -1,5 +1,7 @@
+/* eslint-disable no-console */
 import assert from 'assert/strict';
 
+import { SensorAccessory } from '../src/SensorAccessory';
 import { SecuritySystemAccessory, ServerState } from '../src/SecuritySystemAccessory';
 import { ContactSensorState, LowBattery, Sensor, SensorCategory, TitleKey, parseAllDeviceData } from '../src/WeBeHomeSensor';
 import { WeBeHomeAPI, parseSecuritySystemStatus } from '../src/WeBeHomeAPI';
@@ -59,6 +61,10 @@ function fakeLog() {
 }
 
 const fakeCharacteristic = {
+  Manufacturer: 'Manufacturer',
+  Model: 'Model',
+  Name: 'Name',
+  SerialNumber: 'SerialNumber',
   ContactSensorState: {
     CONTACT_DETECTED: 0,
     CONTACT_NOT_DETECTED: 1,
@@ -86,15 +92,110 @@ const fakeCharacteristic = {
   },
 };
 
+class FakeService {
+  public readonly updates: Array<{ characteristic: unknown; value: unknown }> = [];
+  private readonly getHandlers = new Map<unknown, () => unknown>();
+
+  constructor(
+    public readonly name?: string,
+    public readonly subtype?: string,
+  ) {
+  }
+
+  setCharacteristic(characteristic: unknown, value: unknown): this {
+    this.updates.push({ characteristic, value });
+    return this;
+  }
+
+  updateCharacteristic(characteristic: unknown, value: unknown): this {
+    this.updates.push({ characteristic, value });
+    return this;
+  }
+
+  getCharacteristic(characteristic: unknown) {
+    const characteristicApi = {
+      onGet: (handler: () => unknown) => {
+        this.getHandlers.set(characteristic, handler);
+        return characteristicApi;
+      },
+    };
+
+    return characteristicApi;
+  }
+}
+
+class FakeAccessoryInformationService extends FakeService {}
+class FakeContactSensorService extends FakeService {}
+class FakeSmokeSensorService extends FakeService {}
+
+function sensorPlatform() {
+  const accessoryInformation = new FakeAccessoryInformationService();
+  const services: FakeService[] = [];
+  const accessory = {
+    context: {},
+    addService: (service: FakeService) => {
+      services.push(service);
+    },
+    getService: (serviceType: unknown) => {
+      if (serviceType === FakeAccessoryInformationService) {
+        return accessoryInformation;
+      }
+      return undefined;
+    },
+  };
+  const platform = {
+    Characteristic: fakeCharacteristic,
+    Service: {
+      AccessoryInformation: FakeAccessoryInformationService,
+      ContactSensor: FakeContactSensorService,
+      SmokeSensor: FakeSmokeSensorService,
+    },
+    log: fakeLog(),
+  };
+
+  return {
+    accessory,
+    platform,
+    services,
+  };
+}
+
 function securitySystemAccessory(platformOverrides = {}) {
+  class FakeHapStatusError extends Error {
+    constructor(public readonly status: number) {
+      super(`HAP status ${status}`);
+    }
+  }
+
   const accessory = Object.create(SecuritySystemAccessory.prototype) as SecuritySystemAccessory;
   Object.defineProperty(accessory, 'platform', {
     value: {
       Characteristic: fakeCharacteristic,
+      api: {
+        hap: {
+          HAPStatus: {
+            SERVICE_COMMUNICATION_FAILURE: -70402,
+          },
+          HapStatusError: FakeHapStatusError,
+        },
+      },
       log: fakeLog(),
+      refreshSecuritySystem: async () => undefined,
       setStateForSecuritySystem: async () => undefined,
       ...platformOverrides,
     },
+  });
+  Object.defineProperty(accessory, 'service', {
+    value: {
+      updateCharacteristic: () => undefined,
+    },
+  });
+  Object.defineProperty(accessory, 'statusDict', {
+    value: {
+      uuid: 'alarm-uuid',
+      status: ServerState.Disarmed,
+    },
+    writable: true,
   });
 
   return accessory;
@@ -139,6 +240,34 @@ test('Sensor.updateState refreshes state and low-battery fields', () => {
   assert.equal(sensor.hasLowBattery(), true);
 });
 
+test('SensorAccessory returns cached contact and battery states', () => {
+  const { accessory, platform, services } = sensorPlatform();
+  const sensor = new Sensor(fakeLog() as never, sensorData());
+  const sensorAccessory = new SensorAccessory(platform as never, accessory as never, sensor);
+
+  assert.equal(services.length, 1);
+  assert.equal(sensorAccessory.handleContactSensorStateGet(), fakeCharacteristic.ContactSensorState.CONTACT_DETECTED);
+  assert.equal(sensorAccessory.handleStatusLowBatteryGet(), fakeCharacteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL);
+
+  sensorAccessory.updateSensor(sensorData({
+    [TitleKey.LastSignal]: LowBattery.LowBattery,
+    [TitleKey.OperationStatus]: ContactSensorState.Open,
+  }));
+
+  assert.equal(sensorAccessory.handleContactSensorStateGet(), fakeCharacteristic.ContactSensorState.CONTACT_NOT_DETECTED);
+  assert.equal(sensorAccessory.handleStatusLowBatteryGet(), fakeCharacteristic.StatusLowBattery.BATTERY_LEVEL_LOW);
+  assert.deepEqual(services[0].updates.slice(-2), [
+    {
+      characteristic: fakeCharacteristic.StatusLowBattery,
+      value: fakeCharacteristic.StatusLowBattery.BATTERY_LEVEL_LOW,
+    },
+    {
+      characteristic: fakeCharacteristic.ContactSensorState,
+      value: fakeCharacteristic.ContactSensorState.CONTACT_NOT_DETECTED,
+    },
+  ]);
+});
+
 test('parseSecuritySystemStatus validates and preserves status text', () => {
   assert.deepEqual(parseSecuritySystemStatus('Status:security-uuid:Avlarmat'), {
     uuid: 'security-uuid',
@@ -157,41 +286,42 @@ test('SecuritySystemAccessory maps WeBeHome and HomeKit states', () => {
   assert.equal(accessory.mapServerStateToHomebridgeState(ServerState.Disarmed), fakeCharacteristic.SecuritySystemCurrentState.DISARMED);
   assert.equal(accessory.mapServerStateToHomebridgeState(ServerState.AwayArm), fakeCharacteristic.SecuritySystemCurrentState.AWAY_ARM);
   assert.equal(accessory.mapServerStateToHomebridgeState(ServerState.StayArm), fakeCharacteristic.SecuritySystemCurrentState.STAY_ARM);
+  assert.equal(accessory.mapServerStateToHomebridgeTargetState(ServerState.Disarmed), fakeCharacteristic.SecuritySystemTargetState.DISARM);
+  assert.equal(accessory.mapServerStateToHomebridgeTargetState(ServerState.AwayArm), fakeCharacteristic.SecuritySystemTargetState.AWAY_ARM);
+  assert.equal(accessory.mapServerStateToHomebridgeTargetState(ServerState.StayArm), fakeCharacteristic.SecuritySystemTargetState.STAY_ARM);
   assert.equal(accessory.mapTargetStateToAction(fakeCharacteristic.SecuritySystemTargetState.DISARM), 'disarm');
   assert.equal(accessory.mapTargetStateToAction(fakeCharacteristic.SecuritySystemTargetState.AWAY_ARM), 'away');
   assert.equal(accessory.mapTargetStateToAction(fakeCharacteristic.SecuritySystemTargetState.STAY_ARM), 'home');
   assert.equal(accessory.mapTargetStateToAction(fakeCharacteristic.SecuritySystemTargetState.NIGHT_ARM), 'home');
 });
 
-test('SecuritySystemAccessory set handler calls callback once on success and failure', async () => {
+test('SecuritySystemAccessory set handler resolves on success and rejects on failure', async () => {
   const successfulActions: string[] = [];
+  let refreshCount = 0;
   const successAccessory = securitySystemAccessory({
+    refreshSecuritySystem: async () => {
+      refreshCount++;
+    },
     setStateForSecuritySystem: async (action: string) => {
       successfulActions.push(action);
     },
   });
-  const successCallbackErrors: unknown[] = [];
 
-  await successAccessory.handleSecuritySystemStateSet(fakeCharacteristic.SecuritySystemTargetState.DISARM, error => {
-    successCallbackErrors.push(error);
-  });
+  await successAccessory.handleSecuritySystemStateSet(fakeCharacteristic.SecuritySystemTargetState.DISARM);
 
   assert.deepEqual(successfulActions, ['disarm']);
-  assert.deepEqual(successCallbackErrors, [undefined]);
+  assert.equal(refreshCount, 1);
 
   const failureAccessory = securitySystemAccessory({
     setStateForSecuritySystem: async () => {
       throw new Error('network down');
     },
   });
-  const failureCallbackErrors: unknown[] = [];
 
-  await failureAccessory.handleSecuritySystemStateSet(fakeCharacteristic.SecuritySystemTargetState.AWAY_ARM, error => {
-    failureCallbackErrors.push(error);
-  });
-
-  assert.equal(failureCallbackErrors.length, 1);
-  assert.match((failureCallbackErrors[0] as Error).message, /network down/);
+  await assert.rejects(
+    () => failureAccessory.handleSecuritySystemStateSet(fakeCharacteristic.SecuritySystemTargetState.AWAY_ARM),
+    /HAP status -70402/,
+  );
 });
 
 test('WeBeHomeAPI encodes credentials and caches sensor status fetches', async () => {
@@ -211,30 +341,26 @@ test('WeBeHomeAPI encodes credentials and caches sensor status fetches', async (
 });
 
 test('WeBeHomeAPI fetches security status and posts target actions', async () => {
-  const statusCalls: FetchCall[] = [];
-  const statusApi = new WeBeHomeAPI(fakeLog() as never, {
+  const calls: FetchCall[] = [];
+  const api = new WeBeHomeAPI(fakeLog() as never, {
     login: 'login',
     password: 'password',
-  } as never, fetchClient('Status:alarm-uuid:Avlarmat', statusCalls));
+  } as never, fetchClient('Status:alarm-uuid:Avlarmat', calls));
 
-  assert.deepEqual(await statusApi.fetchSecuritySystemStatus(), {
+  assert.deepEqual(await api.fetchSecuritySystemStatus(), {
     uuid: 'alarm-uuid',
     status: ServerState.Disarmed,
   });
-  assert.match(statusCalls[0].url, /Action=statusdetailed/);
-  assert.match(statusCalls[0].url, /ActionOnly=yes/);
+  assert.match(calls[0].url, /Action=statusdetailed/);
+  assert.match(calls[0].url, /ActionOnly=yes/);
 
-  const actionCalls: FetchCall[] = [];
-  const actionApi = new WeBeHomeAPI(fakeLog() as never, {
-    login: 'login',
-    password: 'password',
-  } as never, fetchClient('', actionCalls));
+  await api.setSecuritySystemTargetState('away');
+  await api.fetchSecuritySystemStatus();
 
-  await actionApi.setSecuritySystemTargetState('away');
-
-  assert.equal(actionCalls.length, 1);
-  assert.match(actionCalls[0].url, /Action=away/);
-  assert.deepEqual(actionCalls[0].options, { method: 'POST' });
+  assert.equal(calls.length, 3);
+  assert.match(calls[1].url, /Action=away/);
+  assert.deepEqual(calls[1].options, { method: 'POST' });
+  assert.match(calls[2].url, /Action=statusdetailed/);
 });
 
 async function run() {

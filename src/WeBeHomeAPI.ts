@@ -12,14 +12,14 @@ type FetchResponse = {
   text: () => Promise<string>;
 };
 
-export type FetchClient = (url: string, options?: object) => Promise<FetchResponse>;
+export type FetchOptions = {
+  method?: string;
+  headers?: Record<string, string>;
+};
 
-async function defaultFetchClient(url: string, options?: object): Promise<FetchResponse> {
-  const nodeFetch = await import('node-fetch');
-  const fetchClient = nodeFetch.default as unknown as FetchClient;
+export type FetchClient = (url: string, options?: FetchOptions) => Promise<FetchResponse>;
 
-  return fetchClient(url, options);
-}
+const defaultFetchClient: FetchClient = (url, options) => fetch(url, options);
 
 export function parseSecuritySystemStatus(data: string): SecuritySystemData {
   const splitResponse = data.split(':');
@@ -100,7 +100,7 @@ export class WeBeHomeAPI {
   }
 
 
-  private async fetchData(url: string, options: object): Promise<string | null> {
+  private async fetchData(url: string, options: FetchOptions): Promise<string | null> {
     const response = await this.fetchClient(url, options);
     if (!response.ok) {
       throw new Error(`HTTP error! Status: ${response.status}`);
@@ -111,10 +111,10 @@ export class WeBeHomeAPI {
     return this.cache = data;
   }
 
-  async fetchSecuritySystemStatus(): Promise<SecuritySystemData> {
+  async fetchSecuritySystemStatus(forceRefresh = false): Promise<SecuritySystemData> {
     const now = Date.now();
 
-    if (now - this.securitySystemLastFetched < this.throttleTime && this.securitySystemCache !== null) {
+    if (!forceRefresh && now - this.securitySystemLastFetched < this.throttleTime && this.securitySystemCache !== null) {
       // If it's been less than 5 seconds since the last fetch, return the cached data
     //   this.log.debug('Returning cached sensor status');
       return this.securitySystemCache;
@@ -160,5 +160,8 @@ export class WeBeHomeAPI {
     if (!response.ok) {
       throw new Error(`Failed to set state. Server responded with ${response.status}`);
     }
+
+    this.securitySystemCache = null;
+    this.securitySystemLastFetched = 0;
   }
 }

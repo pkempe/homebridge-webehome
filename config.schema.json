@@ -2,18 +2,29 @@
   "pluginAlias": "WeBeHome Full",
   "pluginType": "platform",
   "singular": true,
+  "strictValidation": false,
   "schema": {
     "type": "object",
+    "required": [
+      "name",
+      "login",
+      "password"
+    ],
+    "additionalProperties": false,
     "properties": {
+      "name": {
+        "title": "Name",
+        "type": "string",
+        "default": "WeBeHome"
+      },
       "login": {
         "title": "Username",
-        "type": "string",
-        "required": true
+        "type": "string"
       },
       "password": {
         "title": "Password",
         "type": "string",
-        "required": true
+        "format": "password"
       }
     }
   }

@@ -24,13 +24,13 @@ npm test
 npm audit --omit=dev
 ```
 
-The test suite uses `ts-node tests/run-tests.ts` with Node's built-in `assert/strict`. Keep adding focused tests for parsing, state mapping, URL construction, API caching, and HomeKit callback error handling.
+The test suite uses `ts-node tests/run-tests.ts` with Node's built-in `assert/strict`. Keep adding focused tests for parsing, state mapping, URL construction, API caching, and HomeKit promise-handler error handling.
 
 ## Architecture
 
 - `src/index.ts` registers the platform with Homebridge.
 - `src/settings.ts` owns `PLATFORM_NAME` and `PLUGIN_NAME`.
-- `src/WeBeHomePlatform.ts` discovers sensors/security system accessories and restores cached Homebridge accessories.
+- `src/WeBeHomePlatform.ts` discovers sensors/security system accessories, restores cached Homebridge accessories, polls WeBeHome status, and removes stale cached accessories after successful startup discovery.
 - `src/WeBeHomeAPI.ts` calls the WeBeHome HTTP endpoints and caches responses for five seconds.
 - `src/SensorAccessory.ts` maps WeBeHome sensor rows to HomeKit sensor characteristics.
 - `src/SecuritySystemAccessory.ts` maps WeBeHome alarm state and HomeKit target state actions.
@@ -57,11 +57,11 @@ Use HomeKit enum values for enum characteristics. Do not return plain booleans f
 
 - Keep credential-bearing URLs out of logs.
 - Build WeBeHome URLs with `URLSearchParams`; usernames and passwords may contain reserved URL characters.
-- HomeKit get/set handlers must call their callback exactly once, including on network or parse errors.
+- HomeKit handlers use Homebridge's promise-style `.onGet()` / `.onSet()` APIs. Keep `.onGet()` fast by returning cached state; do network refreshes in the platform polling path and push updates with `updateCharacteristic`.
 - Keep the short-lived API cache behavior in mind when debugging repeated HomeKit reads.
 - Do not enable motion sensors until the actual WeBeHome motion status values are verified against real data.
 - `dist/` is generated and ignored; do not commit it unless project policy changes.
 
 ## Package Notes
 
-The package is still marked `"private": true` and has placeholder repository metadata. Update package metadata before publishing.
+The package is still marked `"private": true` to avoid accidental npm publishing. Remove that flag only when preparing an npm release.

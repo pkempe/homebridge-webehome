@@ -27,8 +27,8 @@ HomeKit target state changes call the WeBeHome API actions:
 
 ## Requirements
 
-- Node.js `>=14.18.1`
-- Homebridge `>=1.3.5`
+- Node.js `^20.18.0`, `^22.10.0`, or `^24.0.0`
+- Homebridge `^1.8.0` or `^2.0.0-beta.0`
 - A WeBeHome account with API access credentials
 
 ## Installation
@@ -73,7 +73,9 @@ On Homebridge startup, the platform waits for `didFinishLaunching`, then:
 4. Fetches detailed alarm status from `https://webehome.com/Public/login.aspx`.
 5. Registers or restores the security system accessory.
 
-Sensor and security status requests are cached for five seconds to avoid hammering the WeBeHome endpoints when HomeKit asks several characteristics in quick succession.
+After startup, the platform refreshes WeBeHome status in the background and pushes changes to HomeKit with `updateCharacteristic`. HomeKit `onGet` handlers return the latest cached value so reads stay fast, while WeBeHome HTTP responses still use a five-second API cache to avoid hammering the endpoints when several values are refreshed together.
+
+Cached Homebridge accessories that no longer appear in a successful startup discovery are removed automatically. Polling can add newly discovered supported sensors without requiring a Homebridge restart.
 
 ## Development
 
@@ -87,7 +89,7 @@ npm run watch
 npm audit --omit=dev
 ```
 
-The test suite is a lightweight `ts-node` runner under `tests/`. It currently covers WeBeHome response parsing, HomeKit security state mapping, callback error handling, URL encoding, and short-lived API caching.
+The test suite is a lightweight `ts-node` runner under `tests/`. It currently covers WeBeHome response parsing, HomeKit security state mapping, promise-handler error handling, URL encoding, and short-lived API caching.
 
 ## Project Layout
 
@@ -103,4 +105,4 @@ The test suite is a lightweight `ts-node` runner under `tests/`. It currently co
 
 ## Publishing Status
 
-This package is currently marked `"private": true` and still has placeholder repository metadata in `package.json`. Update the metadata and remove `private` before publishing to npm.
+This package is currently marked `"private": true` to prevent accidental npm publishing. Remove that flag before publishing a release.

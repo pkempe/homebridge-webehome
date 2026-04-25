@@ -101,7 +101,16 @@ export class Sensor {
       throw new Error('Insufficient data to update state');
     }
 
-    // Update the `state` property
+    this.description = deviceData[TitleKey.DESCR] || '';
+    this.sensorDescription = deviceData[TitleKey.SDESCR] || '';
+    this.readingUpdated = deviceData[TitleKey.ReadingUpdated] || '';
+    this.lastContact = deviceData[TitleKey.LastContact] || '';
+    this.lastSignal = deviceData[TitleKey.LastSignal] || '';
+    this.deviceCategory = deviceData[TitleKey.CAT] || '';
+    this.deviceType = deviceData[TitleKey.Devicetype] || '';
+    this.operationStatus = deviceData[TitleKey.OperationStatus] || '';
+    this.model = this.sensorDescription;
+    this.name = this.description;
     this.state = deviceData[TitleKey.OperationStatus] || '';
   }
 

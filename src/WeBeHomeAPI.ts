@@ -1,5 +1,6 @@
 import fetch from 'node-fetch';
-import { PlatformConfig, Logger, CharacteristicSetCallback } from 'homebridge';
+import { PlatformConfig, Logger } from 'homebridge';
+import { URLSearchParams } from 'url';
 
 export type SecuritySystemData = {
     uuid: string;
@@ -27,6 +28,16 @@ export class WeBeHomeAPI {
     this.password = config['password'];
   }
 
+  private buildUrl(baseUrl: string, params: Record<string, string>): string {
+    const query = new URLSearchParams({
+      LoginName: this.login,
+      Password: this.password,
+      ...params,
+    });
+
+    return `${baseUrl}?${query.toString()}`;
+  }
+
   async fetchStatus(): Promise<string | null> {
     const now = Date.now();
 
@@ -43,7 +54,9 @@ export class WeBeHomeAPI {
 
     // If it's been more than 5 seconds since the last fetch, fetch new data
     this.log.debug('Fetching new sensor status');
-    const url = `https://webehome.com/API/WebAPI.aspx?Function=GetSubUnitStatus&LoginName=${this.login}&Password=${this.password}`;
+    const url = this.buildUrl('https://webehome.com/API/WebAPI.aspx', {
+      Function: 'GetSubUnitStatus',
+    });
     const options = {
       headers: {
         'User-Agent': 'request',
@@ -51,10 +64,7 @@ export class WeBeHomeAPI {
     };
 
     // Save the promise so other calls can use it
-    this.fetching = this.fetchData(url, options);
-
-    // Don't forget to reset fetching to null once it's done
-    this.fetching.finally(() => {
+    this.fetching = this.fetchData(url, options).finally(() => {
       this.fetching = null;
     });
 
@@ -70,7 +80,6 @@ export class WeBeHomeAPI {
     const data = await response.text();
 
     this.lastFetched = Date.now();
-    this.fetching = null;  // Reset the fetching promise
     return this.cache = data;
   }
 
@@ -86,8 +95,10 @@ export class WeBeHomeAPI {
     // If it's been more than 5 seconds since the last fetch, fetch new data
     this.log.debug('Fetching new security system status');
 
-    // eslint-disable-next-line max-len
-    const url = `https://webehome.com/Public/login.aspx?LoginName=${this.login}&Password=${this.password}&Action=statusdetailed&ActionOnly=yes`;
+    const url = this.buildUrl('https://webehome.com/Public/login.aspx', {
+      Action: 'statusdetailed',
+      ActionOnly: 'yes',
+    });
     const options = {
       headers: {
         'User-Agent': 'request',
@@ -100,12 +111,12 @@ export class WeBeHomeAPI {
     }
     const data = await response.text();
 
-    // First, split the string into an array on the ':' character
     const splitResponse = data.split(':');
-
-    // The parts you're interested in are the second (index 1) and third (index 2) parts
-    const uuid = splitResponse[1].trim();  // trim() is used to remove any leading or trailing whitespace
-    const status = splitResponse[2].trim();
+    const uuid = splitResponse[1]?.trim();
+    const status = splitResponse.slice(2).join(':').trim();
+    if (!uuid || !status) {
+      throw new Error('Unexpected security system status response');
+    }
 
     // Now you can create your dictionary
     const result: SecuritySystemData = {
@@ -114,37 +125,23 @@ export class WeBeHomeAPI {
     };
 
     this.securitySystemCache = result;
-    this.securitySystemLastFetched = now;
+    this.securitySystemLastFetched = Date.now();
 
     return this.securitySystemCache;
   }
 
-  async setSecuritySystemTargetState(
-    action: string,
-    callback: CharacteristicSetCallback) {
-    try {
-      this.log.info('Invoking action', action);
+  async setSecuritySystemTargetState(action: string): Promise<void> {
+    this.log.info('Invoking action', action);
 
-      // Create the URL for the fetch call
-      // eslint-disable-next-line max-len
-      const url = `https://webehome.com/Public/login.aspx?LoginName=${this.login}&Password=${this.password}&Action=${action}&ActionOnly=yes`;
+    const url = this.buildUrl('https://webehome.com/Public/login.aspx', {
+      Action: action,
+      ActionOnly: 'yes',
+    });
 
-      // Make the fetch call
-      const response = await fetch(url, { method: 'POST' });
+    const response = await fetch(url, { method: 'POST' });
 
-      // Check if the request was successful
-      if (!response.ok) {
-        throw new Error(`Failed to set state. Server responded with ${response.status}`);
-      }
-
-      // Success! No errors, so call the callback with no arguments
-      callback();
-    } catch (error) {
-      this.log.error('Error setting state:', error);
-
-      // Error! Call the callback with the error
-      callback(error as Error);
-
+    if (!response.ok) {
+      throw new Error(`Failed to set state. Server responded with ${response.status}`);
     }
   }
 }

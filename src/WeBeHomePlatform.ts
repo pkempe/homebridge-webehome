@@ -1,5 +1,5 @@
 import { API, DynamicPlatformPlugin, Logger,
-  PlatformAccessory, PlatformConfig, Service, Characteristic, CharacteristicSetCallback } from 'homebridge';
+  PlatformAccessory, PlatformConfig, Service, Characteristic } from 'homebridge';
 
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings';
 import { SensorAccessory } from './SensorAccessory';
@@ -73,17 +73,16 @@ export class WeBeHome implements DynamicPlatformPlugin {
       const deviceDataArray = parseAllDeviceData(data);
 
       // Filter the device data array and create a new Sensor object from each element
-      const sensors = deviceDataArray
-        .filter(deviceData =>
-          deviceData[TitleKey.DESCR] !== '' &&
-          deviceData[TitleKey.DESCR] !== undefined &&
-          deviceData[TitleKey.CAT] !== undefined &&
-          // Stänger av rörelsedetektorer tills vidare
-          // [SensorCategory.ContactSensor, SensorCategory.MotionDetector, SensorCategory.SmokeDetector]
-          [SensorCategory.ContactSensor, SensorCategory.SmokeDetector]
-            .includes(parseInt(deviceData[TitleKey.CAT]!)),
-        )
-        .map(deviceData => new Sensor(this.log, deviceData));
+      const sensorDataArray = deviceDataArray.filter(deviceData =>
+        deviceData[TitleKey.DESCR] !== '' &&
+        deviceData[TitleKey.DESCR] !== undefined &&
+        deviceData[TitleKey.CAT] !== undefined &&
+        // Stänger av rörelsedetektorer tills vidare
+        // [SensorCategory.ContactSensor, SensorCategory.MotionDetector, SensorCategory.SmokeDetector]
+        [SensorCategory.ContactSensor, SensorCategory.SmokeDetector]
+          .includes(parseInt(deviceData[TitleKey.CAT]!)),
+      );
+      const sensors = sensorDataArray.map(deviceData => new Sensor(this.log, deviceData));
 
       // const special = deviceDataArray.filter(deviceData => deviceData[TitleKey.SUID] === '99646');
       // this.log.info('Bakre:', special);
@@ -101,7 +100,7 @@ export class WeBeHome implements DynamicPlatformPlugin {
           // this is imported from `platformAccessory.ts`
           const sensorAccessory = new SensorAccessory(this, existingAccessory, device);
           // this.log.debug('Sensor: ', device);
-          sensorAccessory.updateSensor(deviceDataArray[i]);
+          sensorAccessory.updateSensor(sensorDataArray[i]);
 
         } else {
           // the accessory does not yet exist, so we need to create it
@@ -202,8 +201,8 @@ export class WeBeHome implements DynamicPlatformPlugin {
     return data;
   }
 
-  async setStateForSecuritySystem(action: string, callback: CharacteristicSetCallback) {
-    await this.webehomeapi.setSecuritySystemTargetState(action, callback);
+  async setStateForSecuritySystem(action: string): Promise<void> {
+    await this.webehomeapi.setSecuritySystemTargetState(action);
   }
 
 }

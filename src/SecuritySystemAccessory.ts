@@ -1,4 +1,4 @@
-import { CharacteristicGetCallback, CharacteristicSetCallback, PlatformAccessory, Service } from 'homebridge';
+import { CharacteristicGetCallback, CharacteristicSetCallback, CharacteristicValue, PlatformAccessory, Service } from 'homebridge';
 import { WeBeHome } from './WeBeHomePlatform';
 
 export type SecuritySystemData = {
@@ -7,14 +7,13 @@ export type SecuritySystemData = {
 };
 
 export enum ServerState {
-  /** Avlarmat */
-  StayArm = 'Avlarmat',
-  /** Larmat i Bortaläge */
+  /** Armed in away mode. */
   AwayArm = 'Larmat i Bortaläge',
-  /** Larmat i Hemmaläge */
-  NightArm = 'Larmat i Hemmaläge',
-  Disarmed = 'Disarmed', // You'll need to fill this in
-  AlarmTriggered = 'AlarmTriggered', // And this one too
+  /** Armed in home/stay mode. */
+  StayArm = 'Larmat i Hemmaläge',
+  /** Disarmed. */
+  Disarmed = 'Avlarmat',
+  AlarmTriggered = 'AlarmTriggered',
 }
 
 export class SecuritySystemAccessory {
@@ -61,40 +60,40 @@ export class SecuritySystemAccessory {
 
   async handleSecuritySystemStateGet(callback: CharacteristicGetCallback) {
 
-    let state = this.platform.Characteristic.SecuritySystemCurrentState.STAY_ARM;
-    const statusData = await this.platform.fetchStatusForSecuritySystem();
-
-    if (statusData) {
-      this.updateStatus(statusData);
-
-      switch (statusData.status) {
-        case ServerState.StayArm:
-          state = this.platform.Characteristic.SecuritySystemCurrentState.STAY_ARM;
-          break;
-        case ServerState.NightArm:
-          state = this.platform.Characteristic.SecuritySystemCurrentState.NIGHT_ARM;
-          break;
-        case ServerState.AwayArm:
-          state = this.platform.Characteristic.SecuritySystemCurrentState.AWAY_ARM;
-          break;
+    try {
+      const statusData = await this.platform.fetchStatusForSecuritySystem();
+      if (!statusData) {
+        throw new Error('No security system status was returned');
       }
+
+      this.updateStatus(statusData);
+      const state = this.mapServerStateToHomebridgeState(statusData.status);
 
       this.service.updateCharacteristic(this.platform.Characteristic.SecuritySystemCurrentState,
         state);
 
       this.platform.log.debug('Current state of security system:', state);
-
+      callback(null, state);
+    } catch (error) {
+      this.platform.log.error('Failed to get security system state:', error);
+      callback(error as Error);
     }
-
-    callback(null, state);
 
   }
 
-  async handleSecuritySystemStateSet(newValue, callback: CharacteristicSetCallback) {
-    // this.platform.log.debug('Will set state', newValue);
+  async handleSecuritySystemStateSet(newValue: CharacteristicValue, callback: CharacteristicSetCallback) {
+    try {
+      if (typeof newValue !== 'number') {
+        throw new Error(`Invalid target state: ${newValue}`);
+      }
 
-    const action = this.mapTargetStateToAction(newValue);
-    await this.platform.setStateForSecuritySystem(action, callback);
+      const action = this.mapTargetStateToAction(newValue);
+      await this.platform.setStateForSecuritySystem(action);
+      callback();
+    } catch (error) {
+      this.platform.log.error('Failed to set security system state:', error);
+      callback(error as Error);
+    }
 
   }
 
@@ -105,9 +104,11 @@ export class SecuritySystemAccessory {
       case this.platform.Characteristic.SecuritySystemCurrentState.AWAY_ARM:
         return ServerState.AwayArm;
       case this.platform.Characteristic.SecuritySystemCurrentState.NIGHT_ARM:
-        return ServerState.NightArm;
-      case this.platform.Characteristic.SecuritySystemCurrentState.DISARMED:
         return ServerState.StayArm;
+      case this.platform.Characteristic.SecuritySystemCurrentState.DISARMED:
+        return ServerState.Disarmed;
+      case this.platform.Characteristic.SecuritySystemCurrentState.ALARM_TRIGGERED:
+        return ServerState.AlarmTriggered;
       default:
         throw new Error(`Invalid Homebridge state: ${homebridgeState}`);
     }
@@ -119,19 +120,24 @@ export class SecuritySystemAccessory {
         return this.platform.Characteristic.SecuritySystemCurrentState.STAY_ARM;
       case ServerState.AwayArm:
         return this.platform.Characteristic.SecuritySystemCurrentState.AWAY_ARM;
-      case ServerState.NightArm:
-        return this.platform.Characteristic.SecuritySystemCurrentState.NIGHT_ARM;
+      case ServerState.Disarmed:
+        return this.platform.Characteristic.SecuritySystemCurrentState.DISARMED;
+      case ServerState.AlarmTriggered:
+        return this.platform.Characteristic.SecuritySystemCurrentState.ALARM_TRIGGERED;
       default:
         throw new Error(`Invalid server state: ${serverState}`);
     }
   }
 
   mapTargetStateToAction(targetState: number): string {
-    if (targetState === this.platform.Characteristic.SecuritySystemTargetState.STAY_ARM) {
+    if (targetState === this.platform.Characteristic.SecuritySystemTargetState.DISARM) {
       return 'disarm';
     } else if (targetState === this.platform.Characteristic.SecuritySystemTargetState.AWAY_ARM) {
       return 'away';
-    } else if (targetState === this.platform.Characteristic.SecuritySystemTargetState.NIGHT_ARM) {
+    } else if (
+      targetState === this.platform.Characteristic.SecuritySystemTargetState.STAY_ARM ||
+      targetState === this.platform.Characteristic.SecuritySystemTargetState.NIGHT_ARM
+    ) {
       return 'home';
     } else {
       throw new Error(`Invalid target state: ${targetState}`);

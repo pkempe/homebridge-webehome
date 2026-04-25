@@ -87,86 +87,96 @@ export class SensorAccessory {
 
   async handleContactSensorStateGet(callback: CharacteristicGetCallback) {
 
-    let isOpen = true;
+    try {
+      let state = this.platform.Characteristic.ContactSensorState.CONTACT_NOT_DETECTED;
 
-    const sensorData = await this.platform.fetchStatusForSensor(this.sensor.suid);
-    if (sensorData) {
-      this.updateSensor(sensorData);
-      isOpen = this.sensor.getState() === ContactSensorState.Open;
+      const sensorData = await this.platform.fetchStatusForSensor(this.sensor.suid);
+      if (sensorData) {
+        this.updateSensor(sensorData);
+        state = this.sensor.getState() === ContactSensorState.Open ?
+          this.platform.Characteristic.ContactSensorState.CONTACT_NOT_DETECTED :
+          this.platform.Characteristic.ContactSensorState.CONTACT_DETECTED;
 
-      if (isOpen) {
-        this.platform.Characteristic.ContactSensorState.CONTACT_NOT_DETECTED;
-      } else {
-        this.platform.Characteristic.ContactSensorState.CONTACT_DETECTED;
+        // this.platform.log.debug('Current state of the contact sensor', this.sensor.name,
+        // 'is:', state === this.platform.Characteristic.ContactSensorState.CONTACT_NOT_DETECTED ? 'OPEN' : 'CLOSED');
       }
 
-      // this.platform.log.debug('Current state of the contact sensor', this.sensor.name, 'is:', isOpen ? 'OPEN' : 'CLOSED');
+      callback(null, state);
+    } catch (error) {
+      this.platform.log.error('Failed to get contact sensor state for', this.sensor.name, error);
+      callback(error as Error);
     }
-
-    // return the current value to Homebridge
-    callback(null, isOpen);
   }
 
   async handleMotionSensorStateGet(callback: CharacteristicGetCallback) {
 
-    let isMotionDetected = false;
+    try {
+      let isMotionDetected = false;
 
-    const sensorData = await this.platform.fetchStatusForSensor(this.sensor.suid);
-    if (sensorData) {
-      this.updateSensor(sensorData);
-      isMotionDetected = this.sensor.getState() === MotionDetectionState.Detected;
+      const sensorData = await this.platform.fetchStatusForSensor(this.sensor.suid);
+      if (sensorData) {
+        this.updateSensor(sensorData);
+        isMotionDetected = this.sensor.getState() === MotionDetectionState.Detected;
 
-      this.service.updateCharacteristic(this.platform.Characteristic.MotionDetected, isMotionDetected);
+        this.service.updateCharacteristic(this.platform.Characteristic.MotionDetected, isMotionDetected);
+      }
+
+      // this.platform.log.debug('Current state of the motion sensor is:', isMotionDetected ? 'DETECTED' : 'NOT DETECTED');
+      callback(null, isMotionDetected);
+    } catch (error) {
+      this.platform.log.error('Failed to get motion sensor state for', this.sensor.name, error);
+      callback(error as Error);
     }
-
-    // Log the current motion detected state
-    // this.platform.log.debug('Current state of the motion sensor is:', isMotionDetected ? 'DETECTED' : 'NOT DETECTED');
-
-    // you should always call the callback function, even if there was an error, but pass it as the first argument to the function
-    callback(null, isMotionDetected);
   }
 
   async handleSmokeDetectedGet(callback: CharacteristicGetCallback) {
 
-    let isSmokeDetected = false;
+    try {
+      let state = this.platform.Characteristic.SmokeDetected.SMOKE_NOT_DETECTED;
 
-    const sensorData = await this.platform.fetchStatusForSensor(this.sensor.suid);
-    if (sensorData) {
-      this.updateSensor(sensorData);
-      isSmokeDetected = !(this.sensor.getState() === SmokeDetectionState.NotDetected);
+      const sensorData = await this.platform.fetchStatusForSensor(this.sensor.suid);
+      if (sensorData) {
+        this.updateSensor(sensorData);
+        state = this.sensor.getState() === SmokeDetectionState.NotDetected ?
+          this.platform.Characteristic.SmokeDetected.SMOKE_NOT_DETECTED :
+          this.platform.Characteristic.SmokeDetected.SMOKE_DETECTED;
 
-      // Update the smoke detected characteristic
-      this.service.updateCharacteristic(this.platform.Characteristic.SmokeDetected, isSmokeDetected);
+        this.service.updateCharacteristic(this.platform.Characteristic.SmokeDetected, state);
+      }
+
+      // this.platform.log.debug('Current state of the smoke sensor', this.sensor.name, 'is:',
+      // state === this.platform.Characteristic.SmokeDetected.SMOKE_DETECTED ? 'SMOKE DETECTED' : 'SMOKE NOT DETECTED');
+
+      callback(null, state);
+    } catch (error) {
+      this.platform.log.error('Failed to get smoke sensor state for', this.sensor.name, error);
+      callback(error as Error);
     }
-
-    // Log the current smoke detected state
-    // this.platform.log.debug('Current state of the smoke sensor', this.sensor.name, 'is:',
-    // isSmokeDetected ? 'SMOKE DETECTED' : 'SMOKE NOT DETECTED');
-
-    // you should always call the callback function, even if there was an error, but pass it as the first argument to the function
-    callback(null, isSmokeDetected);
   }
 
   async handleStatusLowBatteryGet(callback: CharacteristicGetCallback) {
-    // Here you must implement your own logic to get the actual value from the sensor
-    // Let's assume you have a method `isLowBattery()` in the Sensor class to check if the sensor battery is low
+    try {
+      let isLowBattery = false;
 
-    let isLowBattery = false;
+      const sensorData = await this.platform.fetchStatusForSensor(this.sensor.suid);
+      if (sensorData) {
+        this.updateSensor(sensorData);
+        isLowBattery = this.sensor.hasLowBattery();
 
-    const sensorData = await this.platform.fetchStatusForSensor(this.sensor.suid);
-    if (sensorData) {
-      this.updateSensor(sensorData);
-      isLowBattery = this.sensor.hasLowBattery();
-
-      if (isLowBattery) {
-        this.platform.log.info(this.sensor.name, 'has low battery');
+        if (isLowBattery) {
+          this.platform.log.info(this.sensor.name, 'has low battery');
+        }
+        // this.platform.log.debug('Current battery status of the sensor', this.sensor.name,
+        // 'is:', isLowBattery ? 'LOW' : 'NORMAL');
       }
-      // this.platform.log.debug('Current battery status of the sensor', this.sensor.name, 'is:', isLowBattery ? 'LOW' : 'NORMAL');
-    }
 
-    callback(null, isLowBattery ?
-      this.platform.Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW :
-      this.platform.Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL);
+      callback(null, isLowBattery ?
+        this.platform.Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW :
+        this.platform.Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL);
+    } catch (error) {
+      this.platform.log.error('Failed to get battery status for', this.sensor.name, error);
+      callback(error as Error);
+    }
   }
 
 

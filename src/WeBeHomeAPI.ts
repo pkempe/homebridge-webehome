@@ -29,6 +29,9 @@ type RequestState = {
   backoffUntil: number;
 };
 
+const MIN_REQUEST_TIMEOUT_MS = 1_000;
+const MAX_REQUEST_TIMEOUT_MS = 60_000;
+
 export function parseSecuritySystemStatus(data: string): SecuritySystemData {
   const splitResponse = data.split(':');
   const uuid = splitResponse[1]?.trim();
@@ -45,7 +48,6 @@ export function parseSecuritySystemStatus(data: string): SecuritySystemData {
 
 export class WeBeHomeAPI {
   private log: Logger;
-  private config: PlatformConfig;
   private login: string;
   private password: string;
 
@@ -61,7 +63,7 @@ export class WeBeHomeAPI {
   private cache: string | null = null;
   private securitySystemLastFetched = 0;
   private securitySystemCache: SecuritySystemData | null = null;
-  private readonly requestStates: Record<RequestKind, RequestState> = {
+  private readonly requestStates: Record<Exclude<RequestKind, 'security action'>, RequestState> = {
     sensor: {
       failureCount: 0,
       backoffUntil: 0,
@@ -70,18 +72,14 @@ export class WeBeHomeAPI {
       failureCount: 0,
       backoffUntil: 0,
     },
-    'security action': {
-      failureCount: 0,
-      backoffUntil: 0,
-    },
   };
 
   constructor(log: Logger, config: PlatformConfig, private readonly fetchClient: FetchClient = defaultFetchClient) {
     this.log = log;
-    this.config = config;
     this.login = config['login'];
     this.password = config['password'];
-    this.requestTimeoutMs = this.parsePositiveNumber(config['requestTimeoutMs'], 15_000);
+    this.requestTimeoutMs = this.parseBoundedNumber(config['requestTimeoutMs'], 15_000,
+      MIN_REQUEST_TIMEOUT_MS, MAX_REQUEST_TIMEOUT_MS);
   }
 
   private buildUrl(baseUrl: string, params: Record<string, string>): string {
@@ -194,10 +192,17 @@ export class WeBeHomeAPI {
   }
 
   private async fetchText(url: string, options: FetchOptions, requestKind: RequestKind): Promise<string> {
-    this.throwIfBackedOff(requestKind);
+    const useBackoff = requestKind !== 'security action';
+    if (useBackoff) {
+      this.throwIfBackedOff(requestKind);
+    }
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.requestTimeoutMs);
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, this.requestTimeoutMs);
 
     try {
       const response = await this.fetchClient(url, {
@@ -209,17 +214,21 @@ export class WeBeHomeAPI {
       }
 
       const data = await response.text();
-      this.recordSuccess(requestKind);
+      if (useBackoff) {
+        this.recordSuccess(requestKind);
+      }
       return data;
     } catch (error) {
-      this.recordFailure(requestKind);
-      throw error;
+      if (useBackoff) {
+        this.recordFailure(requestKind);
+      }
+      throw this.sanitizeRequestError(error, requestKind, timedOut);
     } finally {
       clearTimeout(timeout);
     }
   }
 
-  private throwIfBackedOff(requestKind: RequestKind) {
+  private throwIfBackedOff(requestKind: Exclude<RequestKind, 'security action'>) {
     const state = this.requestStates[requestKind];
     const now = Date.now();
 
@@ -229,7 +238,7 @@ export class WeBeHomeAPI {
     }
   }
 
-  private recordSuccess(requestKind: RequestKind) {
+  private recordSuccess(requestKind: Exclude<RequestKind, 'security action'>) {
     const state = this.requestStates[requestKind];
     if (state.failureCount > 0) {
       this.log.debug(`WeBeHome ${requestKind} request recovered after`, state.failureCount, 'failure(s)');
@@ -239,7 +248,7 @@ export class WeBeHomeAPI {
     state.backoffUntil = 0;
   }
 
-  private recordFailure(requestKind: RequestKind) {
+  private recordFailure(requestKind: Exclude<RequestKind, 'security action'>) {
     const state = this.requestStates[requestKind];
     state.failureCount++;
 
@@ -256,9 +265,25 @@ export class WeBeHomeAPI {
       `times; backing off for ${Math.ceil(backoffMs / 1000)} seconds`);
   }
 
-  private parsePositiveNumber(value: unknown, defaultValue: number): number {
+  private sanitizeRequestError(error: unknown, requestKind: RequestKind, timedOut: boolean): Error {
+    if (timedOut) {
+      return new Error(`WeBeHome ${requestKind} request timed out after ${this.requestTimeoutMs}ms`);
+    }
+
+    if (error instanceof Error && error.message.startsWith('HTTP error! Status:')) {
+      return error;
+    }
+
+    return new Error(`WeBeHome ${requestKind} request failed`);
+  }
+
+  private parseBoundedNumber(value: unknown, defaultValue: number, minimum: number, maximum: number): number {
     const parsedValue = typeof value === 'number' ? value : Number.parseInt(String(value), 10);
 
-    return Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : defaultValue;
+    if (!Number.isFinite(parsedValue)) {
+      return defaultValue;
+    }
+
+    return Math.min(Math.max(parsedValue, minimum), maximum);
   }
 }

@@ -3,7 +3,7 @@ import type { API, DynamicPlatformPlugin, Logger,
 
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings';
 import { SensorAccessory } from './SensorAccessory';
-import { SecuritySystemData, WeBeHomeAPI } from './WeBeHomeAPI';
+import { WeBeHomeAPI } from './WeBeHomeAPI';
 import { Sensor, SensorCategory, SensorData, TitleKey, hasParseableDeviceRows, parseAllDeviceData } from './WeBeHomeSensor';
 import { SecuritySystemAccessory } from './SecuritySystemAccessory';
 
@@ -161,9 +161,6 @@ export class WeBeHome implements DynamicPlatformPlugin {
 
       const seenSensorUuids = new Set<string>();
 
-      // const special = deviceDataArray.filter(deviceData => deviceData[TitleKey.SUID] === '99646');
-      // this.log.info('Bakre:', special);
-
       // loop over the discovered devices and register each one if it has not already been registered
       for (const sensorData of sensorDataArray) {
         const device = new Sensor(this.log, sensorData);
@@ -184,8 +181,6 @@ export class WeBeHome implements DynamicPlatformPlugin {
           // create the accessory handler for the restored accessory
           // this is imported from `platformAccessory.ts`
           sensorAccessory = new SensorAccessory(this, accessory, device);
-          // this.log.debug('Sensor: ', device);
-
         } else {
           // the accessory does not yet exist, so we need to create it
           this.log.info('Adding new accessory:', device.name);
@@ -399,17 +394,6 @@ export class WeBeHome implements DynamicPlatformPlugin {
     return sensorData || null;
   }
 
-  async fetchStatusForSecuritySystem(forceRefresh = false): Promise<SecuritySystemData | null > {
-    if (!this.webehomeapi) {
-      this.log.warn('Cannot fetch security system status; WeBeHome Full is not configured.');
-      return null;
-    }
-
-    // Fetch the status from the server
-    const data = await this.webehomeapi.fetchSecuritySystemStatus(forceRefresh);
-    return data;
-  }
-
   async setStateForSecuritySystem(action: string): Promise<void> {
     if (!this.webehomeapi) {
       throw new Error('WeBeHome Full is not configured.');
@@ -438,13 +422,11 @@ export class WeBeHome implements DynamicPlatformPlugin {
       return null;
     }
 
-    // Filter the device data array and create a new Sensor object from each element
+    // Motion detectors are deliberately excluded until their OperationStatus values are verified.
     return deviceDataArray.filter(deviceData =>
       deviceData[TitleKey.DESCR] !== '' &&
       deviceData[TitleKey.DESCR] !== undefined &&
       deviceData[TitleKey.CAT] !== undefined &&
-      // Stänger av rörelsedetektorer tills vidare
-      // [SensorCategory.ContactSensor, SensorCategory.MotionDetector, SensorCategory.SmokeDetector]
       [SensorCategory.ContactSensor, SensorCategory.SmokeDetector]
         .includes(parseInt(deviceData[TitleKey.CAT]!)),
     );

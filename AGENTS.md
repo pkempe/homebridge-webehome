@@ -11,7 +11,7 @@ The plugin currently exposes:
 - WeBeHome smoke sensors as HomeKit `SmokeSensor` services.
 - Sensor low-battery status from the WeBeHome `LastSignal` field.
 
-Motion sensors are deliberately filtered out in `src/WeBeHomePlatform.ts` until the WeBeHome motion `OperationStatus` values are confirmed.
+Motion sensors are deliberately not implemented. `src/WeBeHomeSensor.ts` still defines the WeBeHome motion category for parsing clarity, but `src/WeBeHomePlatform.ts` filters motion devices out until the WeBeHome motion `OperationStatus` values are confirmed.
 
 ## Commands
 
@@ -24,7 +24,7 @@ npm test
 npm audit --omit=dev
 ```
 
-The test suite uses `ts-node tests/run-tests.ts` with Node's built-in `assert/strict`. Keep adding focused tests for parsing, state mapping, URL construction, API caching, request coalescing, timeout/backoff behavior, and HomeKit promise-handler error handling.
+The test suite uses `ts-node tests/run-tests.ts` with Node's built-in `assert/strict`. Keep adding focused tests for parsing, state mapping, URL construction, sanitized request errors, API caching, request coalescing, timeout/backoff behavior, and HomeKit promise-handler error handling.
 
 ## Architecture
 
@@ -56,7 +56,7 @@ Use HomeKit enum values for enum characteristics. Do not return plain booleans f
 ## Coding Guidance
 
 - Keep credential-bearing URLs out of logs.
-- Build WeBeHome URLs with `URLSearchParams`; usernames and passwords may contain reserved URL characters.
+- Build WeBeHome URLs with `URLSearchParams`; usernames and passwords may contain reserved URL characters. The local API reference documents `LoginName` and `Password` as URL parameters, so sanitize request errors instead of rethrowing credential-bearing URLs.
 - HomeKit handlers use Homebridge's promise-style `.onGet()` / `.onSet()` APIs. Keep `.onGet()` fast by returning cached state, but request an on-access refresh so opening an accessory still attempts to pull fresh WeBeHome state.
 - Keep the short-lived API cache, on-access refresh cooldown, in-flight coalescing, and timeout/backoff behavior in mind when debugging repeated HomeKit reads.
 - Do not enable motion sensors until the actual WeBeHome motion status values are verified against real data.

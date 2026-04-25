@@ -109,23 +109,6 @@ export class SecuritySystemAccessory {
 
   }
 
-  mapHomebridgeStateToServerState(homebridgeState: number): string {
-    switch(homebridgeState) {
-      case this.platform.Characteristic.SecuritySystemCurrentState.STAY_ARM:
-        return ServerState.StayArm;
-      case this.platform.Characteristic.SecuritySystemCurrentState.AWAY_ARM:
-        return ServerState.AwayArm;
-      case this.platform.Characteristic.SecuritySystemCurrentState.NIGHT_ARM:
-        return ServerState.StayArm;
-      case this.platform.Characteristic.SecuritySystemCurrentState.DISARMED:
-        return ServerState.Disarmed;
-      case this.platform.Characteristic.SecuritySystemCurrentState.ALARM_TRIGGERED:
-        return ServerState.AlarmTriggered;
-      default:
-        throw new Error(`Invalid Homebridge state: ${homebridgeState}`);
-    }
-  }
-
   mapServerStateToHomebridgeState(serverState: string): number {
     switch(serverState) {
       case ServerState.StayArm:

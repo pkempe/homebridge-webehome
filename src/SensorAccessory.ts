@@ -1,7 +1,7 @@
 import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge';
 
 import { WeBeHome } from './WeBeHomePlatform';
-import { ContactSensorState, MotionDetectionState, Sensor, SensorCategory, SensorData, SmokeDetectionState } from './WeBeHomeSensor';
+import { ContactSensorState, Sensor, SensorCategory, SensorData, SmokeDetectionState } from './WeBeHomeSensor';
 
 /**
  * Platform Accessory
@@ -41,20 +41,6 @@ export class SensorAccessory {
           .onGet(this.handleContactSensorStateGet.bind(this));
 
         break;
-        // Stänger av, batterierna är slut i alla enheter och jag vet inte vilket värde på OperationStatus som motsvarar
-        // rörelse upptäckt.
-        // case SensorCategory.MotionDetector:
-        //   if (this.accessory.getService(this.platform.Service.MotionSensor)) {
-        //     serviceExists = true;
-        //     service = this.accessory.getService(this.platform.Service.MotionSensor)!;
-        //   } else {
-        //     service = new this.platform.Service.MotionSensor(sensor.name, sensor.suid.toString());
-        //   }
-
-        //   service.getCharacteristic(this.platform.Characteristic.MotionDetected)
-        //     .onGet(this.handleMotionSensorStateGet.bind(this));
-
-      //   break;
       case SensorCategory.SmokeDetector:
         if (this.accessory.getService(this.platform.Service.SmokeSensor)) {
           serviceExists = true;
@@ -98,11 +84,6 @@ export class SensorAccessory {
     return this.contactSensorState();
   }
 
-  handleMotionSensorStateGet(): CharacteristicValue {
-    this.requestFreshState();
-    return this.sensor.getState() === MotionDetectionState.Detected;
-  }
-
   handleSmokeDetectedGet(): CharacteristicValue {
     this.requestFreshState();
     return this.smokeDetectedState();
@@ -120,9 +101,6 @@ export class SensorAccessory {
     switch (parseInt(this.sensor.deviceCategory)) {
       case SensorCategory.ContactSensor:
         this.service.updateCharacteristic(this.platform.Characteristic.ContactSensorState, this.contactSensorState());
-        break;
-      case SensorCategory.MotionDetector:
-        this.service.updateCharacteristic(this.platform.Characteristic.MotionDetected, this.handleMotionSensorStateGet());
         break;
       case SensorCategory.SmokeDetector:
         this.service.updateCharacteristic(this.platform.Characteristic.SmokeDetected, this.smokeDetectedState());

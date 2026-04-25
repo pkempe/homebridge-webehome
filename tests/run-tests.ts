@@ -492,6 +492,38 @@ test('WeBeHomeAPI security status backoff does not block target actions', async 
   assert.equal(fetchMethod(calls[2].options), 'POST');
 });
 
+test('WeBeHomeAPI does not back off repeated security target actions', async () => {
+  const calls: FetchCall[] = [];
+  const api = new WeBeHomeAPI(fakeLog() as never, {
+    login: 'login',
+    password: 'password',
+  } as never, fetchClient('', calls, false));
+
+  await assert.rejects(() => api.setSecuritySystemTargetState('away'), /HTTP error/);
+  await assert.rejects(() => api.setSecuritySystemTargetState('away'), /HTTP error/);
+  await assert.rejects(() => api.setSecuritySystemTargetState('away'), /HTTP error/);
+
+  assert.equal(calls.length, 3);
+});
+
+test('WeBeHomeAPI sanitizes credential-bearing request errors', async () => {
+  const api = new WeBeHomeAPI(fakeLog() as never, {
+    login: 'login@example.com',
+    password: 'secret-password',
+  } as never, ((url: string) => Promise.reject(new Error(`failed ${url}`))) as FetchClient);
+
+  await assert.rejects(
+    () => api.fetchStatus(true),
+    (error: unknown) => {
+      assert(error instanceof Error);
+      assert.equal(error.message.includes('login@example.com'), false);
+      assert.equal(error.message.includes('secret-password'), false);
+      assert.match(error.message, /WeBeHome sensor request failed/);
+      return true;
+    },
+  );
+});
+
 test('WeBeHomeAPI aborts slow requests after the configured timeout', async () => {
   const api = new WeBeHomeAPI(fakeLog() as never, {
     login: 'login',
@@ -502,7 +534,7 @@ test('WeBeHomeAPI aborts slow requests after the configured timeout', async () =
     signal?.addEventListener('abort', () => reject(new Error(`aborted ${url}`)));
   })) as FetchClient);
 
-  await assert.rejects(() => api.fetchStatus(true), /aborted/);
+  await assert.rejects(() => api.fetchStatus(true), /timed out after 1000ms/);
 });
 
 async function run() {

@@ -22,18 +22,13 @@ export enum TitleKey {
   }
 
 export enum ContactSensorState {
-	Open = '64',
-	Closed = '72'
-  }
-
-export enum MotionDetectionState {
-	Detected = '64', // Måste verifieras
-	NotDetected = '72' // Måste verifieras
-  }
+  Open = '64',
+  Closed = '72'
+}
 
 export enum SmokeDetectionState {
-	NotDetected = '88'
-  }
+  NotDetected = '88'
+}
 
 export enum SensorCategory {
 	ContactSensor = 2,

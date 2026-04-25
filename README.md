@@ -9,7 +9,7 @@ Homebridge WeBeHome Full is a Homebridge dynamic platform plugin for WeBeHome al
 - Smoke sensors discovered from WeBeHome sub-unit status data.
 - Low-battery status for discovered sensors when WeBeHome reports `LastSignal` as low battery.
 
-Motion sensors are intentionally not exposed at the moment. The source still contains the category and handler scaffolding, but discovery filters them out until the WeBeHome motion `OperationStatus` values are verified.
+Motion sensors are intentionally not implemented at the moment. The parser still knows the WeBeHome motion category, but discovery filters motion devices out until the WeBeHome motion `OperationStatus` values are verified.
 
 ## Security System Mapping
 
@@ -81,6 +81,8 @@ HomeKit `onGet` handlers return the latest cached value so reads stay fast, and 
 
 WeBeHome HTTP requests have a timeout and short failure backoff. Sensor status and security status requests are also coalesced while an identical fetch is already in flight.
 
+The local WeBeHome API reference documents `LoginName` and `Password` as URL parameters for both the browser-style Web API and the login/action URLs. The plugin follows that documented interface and avoids logging or rethrowing credential-bearing URLs.
+
 ## Development
 
 Useful commands:
@@ -93,7 +95,7 @@ npm run watch
 npm audit --omit=dev
 ```
 
-The test suite is a lightweight `ts-node` runner under `tests/`. It currently covers WeBeHome response parsing, HomeKit security state mapping, promise-handler error handling, URL encoding, short-lived API caching, request coalescing, timeout aborts, and failure backoff.
+The test suite is a lightweight `ts-node` runner under `tests/`. It currently covers WeBeHome response parsing, HomeKit security state mapping, promise-handler error handling, URL encoding, sanitized request errors, short-lived API caching, request coalescing, timeout aborts, and failure backoff.
 
 ## Project Layout
 

@@ -35,7 +35,7 @@ const MAX_REQUEST_TIMEOUT_MS = 60_000;
 export function parseSecuritySystemStatus(data: string): SecuritySystemData {
   const splitResponse = data.split(':');
   const uuid = splitResponse[1]?.trim();
-  const status = splitResponse.slice(2).join(':').trim();
+  const status = splitResponse[2]?.trim();
   if (!uuid || !status) {
     throw new Error('Unexpected security system status response');
   }

@@ -2,7 +2,7 @@
 
 ## Project
 
-This is a TypeScript Homebridge dynamic platform plugin for WeBeHome alarm systems. The platform registers as `WeBeHome Full` and the package name is `homebridge-webehome-full`.
+This is a TypeScript Homebridge dynamic platform plugin for WeBeHome alarm systems. The platform registers as `WeBeHome` and the package name is `homebridge-webehome`.
 
 The plugin currently exposes:
 
@@ -35,16 +35,18 @@ The test suite uses `ts-node tests/run-tests.ts` with Node's built-in `assert/st
 - `src/SensorAccessory.ts` maps WeBeHome sensor rows to HomeKit sensor characteristics.
 - `src/SecuritySystemAccessory.ts` maps WeBeHome alarm state and HomeKit target state actions.
 - `src/WeBeHomeSensor.ts` parses the WeBeHome pipe-delimited sensor status response.
-- `docs/wbh-customer-api.v1.16.json` is the machine-readable WeBeHome Customer API reference. Prefer it over parsing the PDF during normal coding work.
-- `WBH_Customer_API.pdf` is the original WeBeHome API reference.
+- `docs/wbh-customer-api.v1.16.json` is the machine-readable WeBeHome Customer API reference. Prefer it over scraping the public docs during normal coding work.
+- The public WeBeHome API documentation is available at https://webehome.com/sv/docs.
 
 ## WeBeHome Details
 
 The security system state mapping currently depends on these Swedish WeBeHome status strings:
 
-- `Avlarmat` means disarmed.
-- `Larmat i Bortaläge` means armed away.
-- `Larmat i Hemmaläge` means armed stay/home.
+- `Avlarmat` maps to HomeKit disarmed.
+- `Larmat i Bortaläge` maps to HomeKit away arm.
+- `Larmat i Hemmaläge` maps to HomeKit night arm.
+- Literal `Disarmed` maps the same as `Avlarmat`.
+- `AlarmTriggered` maps to HomeKit current-state alarm triggered; there is no HomeKit alarm-triggered target state, so preserve the last known armed target state.
 
 HomeKit target state actions map to WeBeHome API actions:
 
@@ -57,7 +59,7 @@ Use HomeKit enum values for enum characteristics. Do not return plain booleans f
 ## Coding Guidance
 
 - Keep credential-bearing URLs out of logs.
-- Build WeBeHome URLs with `URLSearchParams`; usernames and passwords may contain reserved URL characters. The local API reference documents `LoginName` and `Password` as URL parameters, so sanitize request errors instead of rethrowing credential-bearing URLs.
+- Build WeBeHome URLs with `URLSearchParams`; usernames and passwords may contain reserved URL characters. The API reference documents `LoginName` and `Password` as URL parameters, so sanitize request errors instead of rethrowing credential-bearing URLs.
 - HomeKit handlers use Homebridge's promise-style `.onGet()` / `.onSet()` APIs. Keep `.onGet()` fast by returning cached state, but request an on-access refresh so opening an accessory still attempts to pull fresh WeBeHome state.
 - Keep the short-lived API cache, on-access refresh cooldown, in-flight coalescing, and timeout/backoff behavior in mind when debugging repeated HomeKit reads.
 - Do not enable motion sensors until the actual WeBeHome motion status values are verified against real data.
@@ -65,4 +67,4 @@ Use HomeKit enum values for enum characteristics. Do not return plain booleans f
 
 ## Package Notes
 
-The package is still marked `"private": true` to avoid accidental npm publishing. Remove that flag only when preparing an npm release.
+The package is prepared for public npm publishing as `homebridge-webehome`.

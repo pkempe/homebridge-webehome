@@ -1,6 +1,12 @@
-# Homebridge WeBeHome Full
+# Homebridge WeBeHome
 
-Homebridge WeBeHome Full is a Homebridge dynamic platform plugin for WeBeHome alarm installations. It logs in to the WeBeHome customer APIs, discovers supported alarm devices, and exposes them to Apple Home as HomeKit accessories.
+Homebridge WeBeHome is a Homebridge dynamic platform plugin for WeBeHome alarm installations. It logs in to the WeBeHome customer APIs, discovers supported alarm devices, and exposes them to Apple Home as HomeKit accessories.
+
+## What Is WeBeHome?
+
+[WeBeHome](https://www.webehome.com/) is a Swedish cloud-based alarm and smart-home service from WeBeHome AB. A WeBeHome installation can include an alarm base unit, wireless sensors, cameras, switches, meters, and other smart-home devices. The base unit stays connected to WeBeHome's cloud service, where events, readings, and camera data can be monitored and controlled from mobile apps or a web browser.
+
+This plugin is not affiliated with WeBeHome AB. It integrates with the customer-facing WeBeHome APIs so existing WeBeHome alarm and sensor data can be exposed to HomeKit through Homebridge.
 
 ## What It Exposes
 
@@ -17,7 +23,11 @@ The plugin maps WeBeHome alarm states to HomeKit security system states:
 
 - `Avlarmat` -> HomeKit disarmed.
 - `Larmat i Bortaläge` -> HomeKit away arm.
-- `Larmat i Hemmaläge` -> HomeKit stay arm.
+- `Larmat i Hemmaläge` -> HomeKit night arm.
+- `Disarmed` -> HomeKit disarmed, matching `Avlarmat`.
+- `AlarmTriggered` -> HomeKit current-state alarm triggered.
+
+HomeKit `STAY_ARM` means the system is armed while people are home. It is not the same as disarmed. WeBeHome does not currently report a separate stay state; selecting either HomeKit stay arm or night arm sends WeBeHome's `home` action, and WeBeHome reports that mode back as `Larmat i Hemmaläge` / HomeKit night arm. HomeKit has no alarm-triggered target state, so while the alarm is triggered the plugin keeps reporting the last known armed target state. It does not send a disarm command unless HomeKit explicitly sets the target state to disarm.
 
 HomeKit target state changes call the WeBeHome API actions:
 
@@ -33,7 +43,13 @@ HomeKit target state changes call the WeBeHome API actions:
 
 ## Installation
 
-Install dependencies and build the TypeScript output:
+Install the plugin through Homebridge UI, or with npm:
+
+```bash
+sudo npm install -g homebridge-webehome
+```
+
+For local development, install dependencies and build the TypeScript output:
 
 ```bash
 npm install
@@ -54,7 +70,7 @@ Add the platform to the Homebridge `platforms` array:
 
 ```json
 {
-  "platform": "WeBeHome Full",
+  "platform": "WeBeHome",
   "name": "WeBeHome",
   "login": "your-webehome-username",
   "password": "your-webehome-password",
@@ -62,8 +78,10 @@ Add the platform to the Homebridge `platforms` array:
 }
 ```
 
-The plugin alias must be `WeBeHome Full`; that value is registered in `src/settings.ts` and `config.schema.json`.
+The plugin alias must be `WeBeHome`; that value is registered in `src/settings.ts` and `config.schema.json`.
 `requestTimeoutMs` is optional and defaults to 15000.
+
+If you used the unpublished pre-release build, update the old platform value `WeBeHome Full` to `WeBeHome` when moving to the public package.
 
 ## How It Works
 
@@ -81,9 +99,9 @@ HomeKit `onGet` handlers return the latest cached value so reads stay fast, and 
 
 WeBeHome HTTP requests have a timeout and short failure backoff. Sensor status and security status requests are also coalesced while an identical fetch is already in flight.
 
-The local WeBeHome API reference documents `LoginName` and `Password` as URL parameters for both the browser-style Web API and the login/action URLs. The plugin follows that documented interface and avoids logging or rethrowing credential-bearing URLs.
+The WeBeHome API docs are available from [webehome.com/sv/docs](https://webehome.com/sv/docs). They document `LoginName` and `Password` as URL parameters for both the browser-style Web API and the login/action URLs. The plugin follows that documented interface and avoids logging or rethrowing credential-bearing URLs.
 
-The parsed API reference lives in `docs/wbh-customer-api.v1.16.json` so code and tests can inspect the documented endpoints without loading the PDF. Keep `WBH_Customer_API.pdf` as the original source.
+The parsed API reference lives in `docs/wbh-customer-api.v1.16.json` so code and tests can inspect the documented endpoints without storing the full source document in this repository.
 
 ## Development
 
@@ -110,8 +128,7 @@ The test suite is a lightweight `ts-node` runner under `tests/`. It currently co
 - `src/WeBeHomeSensor.ts` parses and models WeBeHome sub-unit status rows.
 - `config.schema.json` defines the Homebridge UI configuration fields.
 - `docs/wbh-customer-api.v1.16.json` is the machine-readable WeBeHome Customer API reference.
-- `WBH_Customer_API.pdf` is the original WeBeHome Customer API reference document.
 
 ## Publishing Status
 
-This package is currently marked `"private": true` to prevent accidental npm publishing. Remove that flag before publishing a release.
+The npm package is prepared as `homebridge-webehome` version `1.0.0`.

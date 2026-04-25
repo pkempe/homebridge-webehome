@@ -313,14 +313,14 @@ test('SensorAccessory returns cached contact and battery states', () => {
   ]);
 });
 
-test('parseSecuritySystemStatus validates and preserves status text', () => {
+test('parseSecuritySystemStatus validates and extracts status text', () => {
   assert.deepEqual(parseSecuritySystemStatus('Status:security-uuid:Avlarmat'), {
     uuid: 'security-uuid',
     status: ServerState.Disarmed,
   });
-  assert.deepEqual(parseSecuritySystemStatus('Status:security-uuid:Larmat i Hemmaläge:extra'), {
+  assert.deepEqual(parseSecuritySystemStatus('Status:security-uuid:Larmat i Hemmaläge:Example User (Internet):07:00:155'), {
     uuid: 'security-uuid',
-    status: 'Larmat i Hemmaläge:extra',
+    status: ServerState.NightArm,
   });
   assert.throws(() => parseSecuritySystemStatus('unexpected'), /Unexpected security system status response/);
 });
@@ -329,11 +329,22 @@ test('SecuritySystemAccessory maps WeBeHome and HomeKit states', () => {
   const accessory = securitySystemAccessory();
 
   assert.equal(accessory.mapServerStateToHomebridgeState(ServerState.Disarmed), fakeCharacteristic.SecuritySystemCurrentState.DISARMED);
+  assert.equal(accessory.mapServerStateToHomebridgeState(ServerState.LiteralDisarmed),
+    fakeCharacteristic.SecuritySystemCurrentState.DISARMED);
   assert.equal(accessory.mapServerStateToHomebridgeState(ServerState.AwayArm), fakeCharacteristic.SecuritySystemCurrentState.AWAY_ARM);
-  assert.equal(accessory.mapServerStateToHomebridgeState(ServerState.StayArm), fakeCharacteristic.SecuritySystemCurrentState.STAY_ARM);
+  assert.equal(accessory.mapServerStateToHomebridgeState(ServerState.NightArm), fakeCharacteristic.SecuritySystemCurrentState.NIGHT_ARM);
+  assert.equal(accessory.mapServerStateToHomebridgeState(ServerState.AlarmTriggered),
+    fakeCharacteristic.SecuritySystemCurrentState.ALARM_TRIGGERED);
   assert.equal(accessory.mapServerStateToHomebridgeTargetState(ServerState.Disarmed), fakeCharacteristic.SecuritySystemTargetState.DISARM);
+  assert.equal(accessory.mapServerStateToHomebridgeTargetState(ServerState.LiteralDisarmed),
+    fakeCharacteristic.SecuritySystemTargetState.DISARM);
+  assert.equal(accessory.mapServerStateToHomebridgeTargetState(ServerState.NightArm),
+    fakeCharacteristic.SecuritySystemTargetState.NIGHT_ARM);
+  assert.equal(accessory.mapServerStateToHomebridgeTargetState(ServerState.AlarmTriggered),
+    fakeCharacteristic.SecuritySystemTargetState.NIGHT_ARM);
   assert.equal(accessory.mapServerStateToHomebridgeTargetState(ServerState.AwayArm), fakeCharacteristic.SecuritySystemTargetState.AWAY_ARM);
-  assert.equal(accessory.mapServerStateToHomebridgeTargetState(ServerState.StayArm), fakeCharacteristic.SecuritySystemTargetState.STAY_ARM);
+  assert.equal(accessory.mapServerStateToHomebridgeTargetState(ServerState.AlarmTriggered),
+    fakeCharacteristic.SecuritySystemTargetState.AWAY_ARM);
   assert.equal(accessory.mapTargetStateToAction(fakeCharacteristic.SecuritySystemTargetState.DISARM), 'disarm');
   assert.equal(accessory.mapTargetStateToAction(fakeCharacteristic.SecuritySystemTargetState.AWAY_ARM), 'away');
   assert.equal(accessory.mapTargetStateToAction(fakeCharacteristic.SecuritySystemTargetState.STAY_ARM), 'home');

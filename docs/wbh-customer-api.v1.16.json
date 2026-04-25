@@ -2,9 +2,9 @@
   "metadata": {
     "name": "WeBeHome Customer API",
     "version": "1.16",
-    "source": "WBH_Customer_API.pdf",
+    "source": "https://webehome.com/sv/docs",
     "format": "hand-normalized-json",
-    "purpose": "Machine-readable local reference for the WeBeHome Customer API without requiring PDF extraction libraries."
+    "purpose": "Machine-readable local reference for the WeBeHome Customer API without requiring document extraction libraries."
   },
   "notes": [
     "The Customer API is documented for WeBeHome customers with BASIC or PREMIUM subscriptions.",
@@ -573,7 +573,7 @@
           "tag": "Unit",
           "field": "Unit1",
           "type": "varchar",
-          "notes": "The PDF lists Unit twice. The current parser names the second occurrence Unit1."
+          "notes": "The source docs list Unit twice. The current parser names the second occurrence Unit1."
         }
       ]
     },

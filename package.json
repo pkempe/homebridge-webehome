@@ -1,23 +1,28 @@
 {
-  "private": true,
-  "displayName": "WeBeHome Full",
-  "name": "homebridge-webehome-full",
-  "version": "0.0.1",
+  "displayName": "WeBeHome",
+  "name": "homebridge-webehome",
+  "version": "1.0.0",
   "description": "Homebridge dynamic platform plugin for WeBeHome alarm systems.",
   "license": "Apache-2.0",
-  "homepage": "https://github.com/pkempe/homebridge-webehome-full#readme",
+  "homepage": "https://github.com/pkempe/homebridge-webehome#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/pkempe/homebridge-webehome-full.git"
+    "url": "git+https://github.com/pkempe/homebridge-webehome.git"
   },
   "bugs": {
-    "url": "https://github.com/pkempe/homebridge-webehome-full/issues"
+    "url": "https://github.com/pkempe/homebridge-webehome/issues"
   },
   "engines": {
     "node": "^20.18.0 || ^22.10.0 || ^24.0.0",
     "homebridge": "^1.8.0 || ^2.0.0-beta.0"
   },
   "main": "dist/index.js",
+  "files": [
+    "dist",
+    "config.schema.json",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\" --max-warnings=0",
     "test": "ts-node tests/run-tests.ts",

@@ -7,18 +7,21 @@ export type SecuritySystemData = {
 };
 
 export enum ServerState {
-  /** Armed in away mode. */
-  AwayArm = 'Larmat i Bortaläge',
-  /** Armed in home/stay mode. */
-  StayArm = 'Larmat i Hemmaläge',
   /** Disarmed. */
   Disarmed = 'Avlarmat',
+  /** Armed in away mode. */
+  AwayArm = 'Larmat i Bortaläge',
+  /** Armed in night/home mode. */
+  NightArm = 'Larmat i Hemmaläge',
+  /** Treat literal English disarmed as equivalent to Avlarmat. */
+  LiteralDisarmed = 'Disarmed',
   AlarmTriggered = 'AlarmTriggered',
 }
 
 export class SecuritySystemAccessory {
 
   private service!: Service;
+  private lastKnownArmedTargetState?: number;
 
   constructor(
     private readonly platform: WeBeHome,
@@ -100,6 +103,7 @@ export class SecuritySystemAccessory {
 
       const action = this.mapTargetStateToAction(newValue);
       await this.platform.setStateForSecuritySystem(action);
+      this.rememberArmedTargetState(newValue);
       this.service.updateCharacteristic(this.platform.Characteristic.SecuritySystemTargetState, newValue);
       await this.platform.refreshSecuritySystem(true);
     } catch (error) {
@@ -111,11 +115,12 @@ export class SecuritySystemAccessory {
 
   mapServerStateToHomebridgeState(serverState: string): number {
     switch(serverState) {
-      case ServerState.StayArm:
-        return this.platform.Characteristic.SecuritySystemCurrentState.STAY_ARM;
       case ServerState.AwayArm:
         return this.platform.Characteristic.SecuritySystemCurrentState.AWAY_ARM;
+      case ServerState.NightArm:
+        return this.platform.Characteristic.SecuritySystemCurrentState.NIGHT_ARM;
       case ServerState.Disarmed:
+      case ServerState.LiteralDisarmed:
         return this.platform.Characteristic.SecuritySystemCurrentState.DISARMED;
       case ServerState.AlarmTriggered:
         return this.platform.Characteristic.SecuritySystemCurrentState.ALARM_TRIGGERED;
@@ -126,13 +131,17 @@ export class SecuritySystemAccessory {
 
   mapServerStateToHomebridgeTargetState(serverState: string): number {
     switch(serverState) {
-      case ServerState.StayArm:
-        return this.platform.Characteristic.SecuritySystemTargetState.STAY_ARM;
       case ServerState.AwayArm:
-      case ServerState.AlarmTriggered:
+        this.lastKnownArmedTargetState = this.platform.Characteristic.SecuritySystemTargetState.AWAY_ARM;
         return this.platform.Characteristic.SecuritySystemTargetState.AWAY_ARM;
+      case ServerState.NightArm:
+        this.lastKnownArmedTargetState = this.platform.Characteristic.SecuritySystemTargetState.NIGHT_ARM;
+        return this.platform.Characteristic.SecuritySystemTargetState.NIGHT_ARM;
       case ServerState.Disarmed:
+      case ServerState.LiteralDisarmed:
         return this.platform.Characteristic.SecuritySystemTargetState.DISARM;
+      case ServerState.AlarmTriggered:
+        return this.lastKnownArmedTargetState ?? this.platform.Characteristic.SecuritySystemTargetState.AWAY_ARM;
       default:
         throw new Error(`Invalid server state: ${serverState}`);
     }
@@ -155,6 +164,16 @@ export class SecuritySystemAccessory {
 
   private communicationError(): Error {
     return new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+  }
+
+  private rememberArmedTargetState(targetState: number) {
+    if (
+      targetState === this.platform.Characteristic.SecuritySystemTargetState.STAY_ARM ||
+      targetState === this.platform.Characteristic.SecuritySystemTargetState.AWAY_ARM ||
+      targetState === this.platform.Characteristic.SecuritySystemTargetState.NIGHT_ARM
+    ) {
+      this.lastKnownArmedTargetState = targetState;
+    }
   }
 
   private requestFreshState() {

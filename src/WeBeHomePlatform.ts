@@ -44,7 +44,7 @@ export class WeBeHome implements DynamicPlatformPlugin {
 
     this.log.debug('Finished initializing platform:', this.config.name);
     if (!this.hasValidConfig(config)) {
-      this.log.error('WeBeHome Full is not configured. Set both "login" and "password" in the platform config.');
+      this.log.error('WeBeHome is not configured. Set both "login" and "password" in the platform config.');
       return;
     }
 
@@ -373,7 +373,7 @@ export class WeBeHome implements DynamicPlatformPlugin {
 
   async fetchStatusForSensor(suid: number, forceRefresh = false): Promise<SensorData | null> {
     if (!this.webehomeapi) {
-      this.log.warn(`Cannot fetch sensor ${suid}; WeBeHome Full is not configured.`);
+      this.log.warn(`Cannot fetch sensor ${suid}; WeBeHome is not configured.`);
       return null;
     }
 
@@ -396,7 +396,7 @@ export class WeBeHome implements DynamicPlatformPlugin {
 
   async setStateForSecuritySystem(action: string): Promise<void> {
     if (!this.webehomeapi) {
-      throw new Error('WeBeHome Full is not configured.');
+      throw new Error('WeBeHome is not configured.');
     }
 
     await this.webehomeapi.setSecuritySystemTargetState(action);

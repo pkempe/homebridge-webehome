@@ -83,6 +83,8 @@ WeBeHome HTTP requests have a timeout and short failure backoff. Sensor status a
 
 The local WeBeHome API reference documents `LoginName` and `Password` as URL parameters for both the browser-style Web API and the login/action URLs. The plugin follows that documented interface and avoids logging or rethrowing credential-bearing URLs.
 
+The parsed API reference lives in `docs/wbh-customer-api.v1.16.json` so code and tests can inspect the documented endpoints without loading the PDF. Keep `WBH_Customer_API.pdf` as the original source.
+
 ## Development
 
 Useful commands:
@@ -107,7 +109,8 @@ The test suite is a lightweight `ts-node` runner under `tests/`. It currently co
 - `src/SecuritySystemAccessory.ts` exposes alarm state and target-state actions to HomeKit.
 - `src/WeBeHomeSensor.ts` parses and models WeBeHome sub-unit status rows.
 - `config.schema.json` defines the Homebridge UI configuration fields.
-- `WBH_Customer_API.pdf` is the local WeBeHome API reference document.
+- `docs/wbh-customer-api.v1.16.json` is the machine-readable WeBeHome Customer API reference.
+- `WBH_Customer_API.pdf` is the original WeBeHome Customer API reference document.
 
 ## Publishing Status
 

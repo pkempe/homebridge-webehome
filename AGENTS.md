@@ -35,7 +35,8 @@ The test suite uses `ts-node tests/run-tests.ts` with Node's built-in `assert/st
 - `src/SensorAccessory.ts` maps WeBeHome sensor rows to HomeKit sensor characteristics.
 - `src/SecuritySystemAccessory.ts` maps WeBeHome alarm state and HomeKit target state actions.
 - `src/WeBeHomeSensor.ts` parses the WeBeHome pipe-delimited sensor status response.
-- `WBH_Customer_API.pdf` is the local WeBeHome API reference.
+- `docs/wbh-customer-api.v1.16.json` is the machine-readable WeBeHome Customer API reference. Prefer it over parsing the PDF during normal coding work.
+- `WBH_Customer_API.pdf` is the original WeBeHome API reference.
 
 ## WeBeHome Details
 

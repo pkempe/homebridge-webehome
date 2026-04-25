@@ -1,0 +1,1067 @@
+{
+  "metadata": {
+    "name": "WeBeHome Customer API",
+    "version": "1.16",
+    "source": "WBH_Customer_API.pdf",
+    "format": "hand-normalized-json",
+    "purpose": "Machine-readable local reference for the WeBeHome Customer API without requiring PDF extraction libraries."
+  },
+  "notes": [
+    "The Customer API is documented for WeBeHome customers with BASIC or PREMIUM subscriptions.",
+    "The Web API uses credential-bearing URL parameters documented by WeBeHome.",
+    "Web API data responses are pipe-delimited text unless HtmlTable=yes is requested.",
+    "WebServiceAPI responses are XML wrapped in NewDataSet/Table tags.",
+    "Dates and times returned by the WebServiceAPI are local to the customer's configured timezone."
+  ],
+  "workflows": [
+    {
+      "id": "basicCustomerConfiguration",
+      "steps": [
+        "Call GetCustomerConfig to discover BaseUnitID values.",
+        "Call GetBaseUnitConfig for each BaseUnitID to discover attached active SubUnits."
+      ]
+    },
+    {
+      "id": "eventDataPolling",
+      "steps": [
+        "For first poll per BaseUnit, call GetEventData with LastDataID=0 to receive up to the last 24 hours.",
+        "Store the highest DataID returned.",
+        "For later polls, call GetEventData with LastDataID set to the last stored DataID."
+      ]
+    }
+  ],
+  "transports": {
+    "webApi": {
+      "baseUrl": "https://webehome.com/API/WebAPI.aspx",
+      "method": "GET",
+      "functionSelector": "Function",
+      "responseFormat": "pipe-delimited text",
+      "commonParameters": [
+        {
+          "name": "LoginName",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "Password",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "HtmlTable",
+          "required": false,
+          "type": "enum",
+          "values": [
+            "yes",
+            "no"
+          ],
+          "default": "no"
+        },
+        {
+          "name": "Heading",
+          "required": false,
+          "type": "enum",
+          "values": [
+            "yes",
+            "no"
+          ],
+          "default": "yes"
+        }
+      ]
+    },
+    "publicLogin": {
+      "baseUrl": "https://webehome.com/Public/login.aspx",
+      "method": "GET",
+      "commonParameters": [
+        {
+          "name": "LoginName",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "Password",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "LocationID",
+          "required": false,
+          "type": "integer",
+          "description": "Needed when the user has access to more than one location."
+        }
+      ]
+    },
+    "graphImage": {
+      "baseUrl": "https://webehome.com/API/GraphImage.ashx",
+      "method": "GET",
+      "responseFormat": "image/jpeg"
+    },
+    "eventApi": {
+      "baseUrl": "https://webehome.com/API/EventAPI.aspx",
+      "method": "GET",
+      "parameterDelimiter": "_",
+      "notes": [
+        "The spec says EventAPI accepts http and https, but http should be avoided.",
+        "Arguments are documented with underscore separators because some devices cannot handle ampersand separated query strings."
+      ]
+    },
+    "webServiceApi": {
+      "baseUrl": "https://webehome.com/API/WebServiceAPI.asmx",
+      "method": "GET_OR_SOAP",
+      "responseFormat": "xml"
+    }
+  },
+  "publicLogin": {
+    "login": {
+      "description": "Login automatically using LoginName and Password.",
+      "parameters": [
+        "LoginName",
+        "Password"
+      ]
+    },
+    "targetPages": {
+      "description": "Login and open a specific page.",
+      "parameter": "targetPage",
+      "values": [
+        "status",
+        "24hour",
+        "cameraLive",
+        "cameraArchive"
+      ],
+      "default": "status"
+    },
+    "actions": {
+      "parameter": "Action",
+      "optionalParameters": [
+        "ActionOnly",
+        "LocationID",
+        "ScenarioID"
+      ],
+      "values": {
+        "disarm": {
+          "description": "Disarm the system."
+        },
+        "home": {
+          "description": "Set the system to home mode."
+        },
+        "away": {
+          "description": "Set the system to away mode."
+        },
+        "clear": {
+          "description": "Clear status/events."
+        },
+        "status": {
+          "requires": {
+            "ActionOnly": "yes"
+          }
+        },
+        "statusdetailed": {
+          "requires": {
+            "ActionOnly": "yes"
+          },
+          "returns": [
+            "operation mode numeric code",
+            "location description",
+            "operation mode text",
+            "changed by",
+            "change date/time",
+            "number of alarm and important events"
+          ]
+        },
+        "startscenario": {
+          "requires": {
+            "ActionOnly": "yes",
+            "ScenarioID": "integer"
+          }
+        }
+      }
+    }
+  },
+  "webApiFunctions": [
+    {
+      "id": "webApi.getCustomerConfig",
+      "section": "4.10",
+      "function": "GetCustomerConfig",
+      "description": "Returns basic customer and BaseUnit information.",
+      "parameters": [
+        {
+          "name": "LoginName",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "Password",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "HtmlTable",
+          "required": false,
+          "type": "boolean-string",
+          "default": "no"
+        },
+        {
+          "name": "Heading",
+          "required": false,
+          "type": "boolean-string",
+          "default": "yes"
+        }
+      ],
+      "outputFields": [
+        {
+          "tag": "CID",
+          "field": "CustomerID",
+          "type": "int"
+        },
+        {
+          "tag": "CN",
+          "field": "CustomerName",
+          "type": "nchar(100)"
+        },
+        {
+          "tag": "LID",
+          "field": "LanguageID",
+          "type": "int"
+        },
+        {
+          "tag": "TZ",
+          "field": "TimeZone",
+          "type": "int"
+        },
+        {
+          "tag": "CoID",
+          "field": "CountryID",
+          "type": "int"
+        },
+        {
+          "tag": "BUID",
+          "field": "BaseUnitID",
+          "type": "int"
+        },
+        {
+          "tag": "DESCR",
+          "field": "Descr",
+          "type": "nchar(50)"
+        },
+        {
+          "tag": "RIP",
+          "field": "RemoteIP",
+          "type": "char(15)"
+        },
+        {
+          "tag": "CDT",
+          "field": "ConnectionDT",
+          "type": "datetime"
+        },
+        {
+          "tag": "DDT",
+          "field": "DisconnectionDT",
+          "type": "datetime"
+        },
+        {
+          "tag": "CRDT",
+          "field": "CreationDT",
+          "type": "datetime"
+        }
+      ],
+      "notes": [
+        "If the customer has more than one BaseUnit, a table is returned for each BaseUnit and customer information is repeated.",
+        "ConnectionDT and DisconnectionDT return 2000-01-01 when no date is stored."
+      ]
+    },
+    {
+      "id": "webApi.getBaseUnitConfig",
+      "section": "4.11",
+      "function": "GetBaseUnitConfig",
+      "description": "Returns SubUnits attached to a BaseUnit.",
+      "parameters": [
+        {
+          "name": "LoginName",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "Password",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "BaseUnitID",
+          "required": false,
+          "type": "integer",
+          "description": "Leave empty to get all BaseUnits the user has access to."
+        },
+        {
+          "name": "HtmlTable",
+          "required": false,
+          "type": "boolean-string",
+          "default": "no"
+        },
+        {
+          "name": "Heading",
+          "required": false,
+          "type": "boolean-string",
+          "default": "yes"
+        }
+      ],
+      "outputFields": [
+        {
+          "tag": "BUID",
+          "field": "BaseUnitID",
+          "type": "int"
+        },
+        {
+          "tag": "SUID",
+          "field": "SubUnitID",
+          "type": "int"
+        },
+        {
+          "tag": "SUTID",
+          "field": "SubUnitTypeID",
+          "type": "int"
+        },
+        {
+          "tag": "SDESCR",
+          "field": "SensorDescr",
+          "type": "char(200)"
+        },
+        {
+          "tag": "CAT",
+          "field": "Category",
+          "type": "int"
+        },
+        {
+          "tag": "DESCR",
+          "field": "Descr",
+          "type": "char(50)"
+        },
+        {
+          "tag": "GNO",
+          "field": "GroupNo",
+          "type": "smallint"
+        },
+        {
+          "tag": "UNO",
+          "field": "UnitUno",
+          "type": "smallint"
+        },
+        {
+          "tag": "GDESCR",
+          "field": "GroupDescription",
+          "type": "char(30)"
+        }
+      ]
+    },
+    {
+      "id": "webApi.getEventData",
+      "section": "4.12",
+      "function": "GetEventData",
+      "description": "Returns event data since LastDataID, up to 5000 rows.",
+      "parameters": [
+        {
+          "name": "LoginName",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "Password",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "BaseUnitID",
+          "required": false,
+          "type": "integer",
+          "description": "Give BaseUnitID or leave empty."
+        },
+        {
+          "name": "LastDataID",
+          "required": false,
+          "type": "integer",
+          "description": "If empty, takes the last 24 hours."
+        },
+        {
+          "name": "HtmlTable",
+          "required": false,
+          "type": "boolean-string",
+          "default": "no"
+        },
+        {
+          "name": "Heading",
+          "required": false,
+          "type": "boolean-string",
+          "default": "yes"
+        }
+      ],
+      "outputFields": [
+        {
+          "tag": "BUID",
+          "field": "BaseUnitID",
+          "type": "int"
+        },
+        {
+          "tag": "SUID",
+          "field": "SubUnitID",
+          "type": "int"
+        },
+        {
+          "tag": "DID",
+          "field": "DataID",
+          "type": "int"
+        },
+        {
+          "tag": "UID",
+          "field": "UserID",
+          "type": "int"
+        },
+        {
+          "tag": "DT",
+          "field": "ReceivedDT",
+          "type": "datetime"
+        },
+        {
+          "tag": "EID",
+          "field": "EventID",
+          "type": "int"
+        },
+        {
+          "tag": "OS",
+          "field": "OperationStatus",
+          "type": "smallint"
+        },
+        {
+          "tag": "DV",
+          "field": "DataValue",
+          "type": "double"
+        }
+      ]
+    },
+    {
+      "id": "webApi.getSubUnitStatus",
+      "section": "4.13",
+      "function": "GetSubUnitStatus",
+      "description": "Returns a list of a BaseUnit's SubUnits and current status data.",
+      "parameters": [
+        {
+          "name": "LoginName",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "Password",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "BaseUnitID",
+          "required": false,
+          "type": "integer",
+          "description": "Give BaseUnitID or leave empty."
+        },
+        {
+          "name": "SubUnitID",
+          "required": false,
+          "type": "integer",
+          "description": "Give a single SubUnitID or leave empty."
+        },
+        {
+          "name": "HtmlTable",
+          "required": false,
+          "type": "boolean-string",
+          "default": "no"
+        },
+        {
+          "name": "Heading",
+          "required": false,
+          "type": "boolean-string",
+          "default": "yes"
+        },
+        {
+          "name": "Minimize",
+          "required": false,
+          "type": "boolean-string",
+          "default": "no"
+        }
+      ],
+      "outputFields": [
+        {
+          "tag": "BUID",
+          "field": "BaseUnitID",
+          "type": "int"
+        },
+        {
+          "tag": "SUID",
+          "field": "SubUnitID",
+          "type": "int"
+        },
+        {
+          "tag": "DESCR",
+          "field": "Descr",
+          "type": "char(50)"
+        },
+        {
+          "tag": "SDESCR",
+          "field": "SensorDescr",
+          "type": "char(200)"
+        },
+        {
+          "tag": "GNO",
+          "field": "GroupNo",
+          "type": "smallint"
+        },
+        {
+          "tag": "UNO",
+          "field": "UnitUno",
+          "type": "smallint"
+        },
+        {
+          "tag": "GDESCR",
+          "field": "GroupDescription",
+          "type": "char(30)"
+        },
+        {
+          "tag": "CAT",
+          "field": "Category",
+          "type": "int"
+        },
+        {
+          "tag": "CD",
+          "field": "CurrentData",
+          "type": "int"
+        },
+        {
+          "tag": "LastSignal",
+          "field": "LastSignal",
+          "type": "varchar"
+        },
+        {
+          "tag": "ReadingUpdated",
+          "field": "ReadingUpdated",
+          "type": "datetime"
+        },
+        {
+          "tag": "LastContact",
+          "field": "LastContact",
+          "type": "datetime"
+        },
+        {
+          "tag": "DeviceType",
+          "field": "DeviceType",
+          "type": "varchar"
+        },
+        {
+          "tag": "Unit",
+          "field": "Unit",
+          "type": "varchar"
+        },
+        {
+          "tag": "RSSI",
+          "field": "RSSI",
+          "type": "int"
+        },
+        {
+          "tag": "OperationStatus",
+          "field": "OperationStatus",
+          "type": "int"
+        },
+        {
+          "tag": "DataValue",
+          "field": "DataValue",
+          "type": "float"
+        },
+        {
+          "tag": "Unit",
+          "field": "Unit1",
+          "type": "varchar",
+          "notes": "The PDF lists Unit twice. The current parser names the second occurrence Unit1."
+        }
+      ]
+    },
+    {
+      "id": "webApi.getMeasurementData",
+      "section": "4.14",
+      "function": "GetMeasurementData",
+      "description": "Returns selected measurement data, up to 5000 rows.",
+      "parameters": [
+        {
+          "name": "LoginName",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "Password",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "BaseUnitID",
+          "required": false,
+          "type": "integer"
+        },
+        {
+          "name": "SubUnitID",
+          "required": false,
+          "type": "integer-list",
+          "description": "Comma separated list of SubUnit IDs or empty."
+        },
+        {
+          "name": "FromDT",
+          "required": false,
+          "type": "date",
+          "format": "yyyy-mm-dd",
+          "description": "Empty means last 7 days."
+        },
+        {
+          "name": "HtmlTable",
+          "required": false,
+          "type": "boolean-string",
+          "default": "no"
+        },
+        {
+          "name": "Heading",
+          "required": false,
+          "type": "boolean-string",
+          "default": "yes"
+        }
+      ],
+      "outputFields": [
+        {
+          "tag": "BUID",
+          "field": "BaseUnitID",
+          "type": "int"
+        },
+        {
+          "tag": "SUID",
+          "field": "SubUnitID",
+          "type": "int"
+        },
+        {
+          "tag": "DID",
+          "field": "DataID",
+          "type": "int"
+        },
+        {
+          "tag": "DT",
+          "field": "ReceivedDT",
+          "type": "datetime"
+        },
+        {
+          "tag": "VAL",
+          "field": "Value",
+          "type": "smallint"
+        }
+      ]
+    },
+    {
+      "id": "webApi.setSwitch",
+      "section": "4.15",
+      "function": "SetSwitch",
+      "description": "Changes status of a switch or dimmer.",
+      "parameters": [
+        {
+          "name": "LoginName",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "Password",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "BaseUnitID",
+          "required": true,
+          "type": "integer"
+        },
+        {
+          "name": "SubUnitID",
+          "required": true,
+          "type": "integer"
+        },
+        {
+          "name": "Status",
+          "required": true,
+          "type": "integer",
+          "values": {
+            "0": "off",
+            "1-98": "dim level",
+            "99": "on"
+          }
+        }
+      ],
+      "response": {
+        "format": "text",
+        "successValue": "ok",
+        "description": "Returns ok if the switch was found and the command was sent."
+      }
+    },
+    {
+      "id": "webApi.getReferenceEvents",
+      "section": "4.16",
+      "function": "GetReferenceEvents",
+      "description": "Returns a reference list of EventIDs and descriptions in the customer's language.",
+      "parameters": [
+        {
+          "name": "LoginName",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "Password",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "HtmlTable",
+          "required": false,
+          "type": "boolean-string",
+          "default": "no"
+        },
+        {
+          "name": "Heading",
+          "required": false,
+          "type": "boolean-string",
+          "default": "yes"
+        }
+      ],
+      "outputFields": [
+        {
+          "tag": "EID",
+          "field": "EventID",
+          "type": "int"
+        },
+        {
+          "tag": "EDESCR",
+          "field": "EventDescr",
+          "type": "char(100)"
+        },
+        {
+          "tag": "LEC1",
+          "field": "LookEventCode",
+          "type": "char(10)"
+        }
+      ]
+    }
+  ],
+  "graphImage": {
+    "section": "4.8",
+    "parameters": [
+      {
+        "name": "LoginName",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Password",
+        "required": false,
+        "type": "string",
+        "description": "Required unless SessionID is used."
+      },
+      {
+        "name": "SessionID",
+        "required": false,
+        "type": "string",
+        "description": "Can be used instead of Password."
+      },
+      {
+        "name": "SUID1",
+        "required": true,
+        "type": "integer"
+      },
+      {
+        "name": "SUID2-SUID8",
+        "required": false,
+        "type": "integer"
+      },
+      {
+        "name": "toDT",
+        "required": false,
+        "type": "datetime",
+        "format": "yyyy-mm-dd_hhQmm",
+        "default": "now"
+      },
+      {
+        "name": "BaseUnitID",
+        "required": false,
+        "type": "integer",
+        "description": "If given, takes the first 8 devices from the BaseUnit."
+      },
+      {
+        "name": "LanguageID",
+        "required": false,
+        "type": "integer",
+        "default": 2,
+        "values": {
+          "1": "Swedish",
+          "2": "English",
+          "3": "Thai",
+          "5": "Spanish",
+          "6": "German"
+        }
+      },
+      {
+        "name": "Period",
+        "required": false,
+        "type": "integer",
+        "default": 7,
+        "values": [
+          1,
+          3,
+          7,
+          14,
+          31,
+          62
+        ]
+      },
+      {
+        "name": "Width",
+        "required": false,
+        "type": "integer",
+        "default": 600
+      },
+      {
+        "name": "Height",
+        "required": false,
+        "type": "integer",
+        "default": 300
+      },
+      {
+        "name": "Group",
+        "required": false,
+        "type": "string"
+      }
+    ]
+  },
+  "eventApi": {
+    "section": "4.9",
+    "description": "Create an event in the event log and update information on the device. Documented as test phase.",
+    "parameters": [
+      {
+        "name": "SUID",
+        "required": true,
+        "type": "integer",
+        "description": "SubUnit ID"
+      },
+      {
+        "name": "EID",
+        "required": true,
+        "type": "integer",
+        "description": "Event ID"
+      },
+      {
+        "name": "UN",
+        "required": true,
+        "type": "string",
+        "description": "Login name"
+      },
+      {
+        "name": "PW",
+        "required": true,
+        "type": "string",
+        "description": "Password"
+      }
+    ],
+    "eventIds": {
+      "20019": "Start/open",
+      "20020": "Stop/close",
+      "20021": "Tamper",
+      "20010": "Supervision"
+    }
+  },
+  "webServiceFunctions": [
+    {
+      "id": "webService.getCustomerConfig",
+      "section": "5.2",
+      "function": "GetCustomerConfig",
+      "description": "Returns customer and BaseUnit information as XML.",
+      "parameters": [
+        {
+          "name": "CustomerID",
+          "required": true,
+          "type": "char(8000)",
+          "description": "Customer ID, 0 for all customer/base units the user belongs to, or comma separated CustomerIDs."
+        },
+        {
+          "name": "LoginName",
+          "required": true,
+          "type": "char(50)"
+        },
+        {
+          "name": "Password",
+          "required": true,
+          "type": "char(30)"
+        }
+      ],
+      "outputFieldsRef": "webApi.getCustomerConfig"
+    },
+    {
+      "id": "webService.getBaseUnitConfig",
+      "section": "5.3",
+      "function": "GetBaseUnitConfig",
+      "description": "Returns SubUnits attached to a BaseUnit as XML.",
+      "parameters": [
+        {
+          "name": "BaseUnitID",
+          "required": true,
+          "type": "int"
+        },
+        {
+          "name": "LoginName",
+          "required": true,
+          "type": "char(50)"
+        },
+        {
+          "name": "Password",
+          "required": true,
+          "type": "char(30)"
+        }
+      ],
+      "outputFieldsRef": "webApi.getBaseUnitConfig"
+    },
+    {
+      "id": "webService.getEventData",
+      "section": "5.4",
+      "function": "GetEventData",
+      "description": "Returns event data since LastDataID as XML.",
+      "parameters": [
+        {
+          "name": "BaseUnitID",
+          "required": true,
+          "type": "char(8000)",
+          "description": "Single BaseUnitID, 0 for all BaseUnits for the customer/login, or comma separated BaseUnitIDs."
+        },
+        {
+          "name": "LoginName",
+          "required": true,
+          "type": "char(50)"
+        },
+        {
+          "name": "Password",
+          "required": true,
+          "type": "char(30)"
+        },
+        {
+          "name": "LastDataID",
+          "required": true,
+          "type": "int",
+          "description": "0 takes last 24 hours; non-zero takes next higher DataID."
+        }
+      ],
+      "outputFields": [
+        {
+          "tag": "BUID",
+          "field": "BaseUnitID",
+          "type": "int"
+        },
+        {
+          "tag": "SUID",
+          "field": "SubUnitID",
+          "type": "int"
+        },
+        {
+          "tag": "DID",
+          "field": "DataID",
+          "type": "int"
+        },
+        {
+          "tag": "UID",
+          "field": "UserID",
+          "type": "int"
+        },
+        {
+          "tag": "DT",
+          "field": "ReceivedDT",
+          "type": "datetime"
+        },
+        {
+          "tag": "EID",
+          "field": "EventID",
+          "type": "int"
+        },
+        {
+          "tag": "OS",
+          "field": "OperationStatus",
+          "type": "smallint"
+        }
+      ]
+    },
+    {
+      "id": "webService.getReferenceEvents",
+      "section": "5.5",
+      "function": "GetReferenceEvents",
+      "description": "Returns reference EventIDs and descriptions as XML.",
+      "parameters": [
+        {
+          "name": "LoginName",
+          "required": true,
+          "type": "char(50)"
+        },
+        {
+          "name": "Password",
+          "required": true,
+          "type": "char(30)"
+        }
+      ],
+      "outputFieldsRef": "webApi.getReferenceEvents"
+    }
+  ],
+  "knownValueMappings": {
+    "publicLoginStatusDetailedOperationMode": {
+      "0": "disarmed",
+      "1": "home",
+      "2": "away",
+      "8": "monitor"
+    },
+    "webServiceOperationStatus": {
+      "magneticContact": {
+        "72": "closed",
+        "64": "open"
+      },
+      "lightDetector": {
+        "8": "below limit or low/light off",
+        "12": "above limit/light on"
+      },
+      "switches": {
+        "100": "off",
+        "199": "on"
+      },
+      "measurements": {
+        "-127..127": "value",
+        "128": "no value"
+      }
+    },
+    "eventIdSourcePrefixes": {
+      "1xxxx": "Event from BaseUnit",
+      "2xxxx": "Signal from SubUnit",
+      "3xxxx": "Message from WeBeHome"
+    },
+    "selectedEventIds": {
+      "10029": "Disarmed",
+      "10047": "Armed (AWAY)",
+      "10048": "Armed (HOME)",
+      "10050": "Armed (AWAY)",
+      "10051": "Disarmed",
+      "10052": "Armed (HOME)",
+      "20018": "Batt.low",
+      "20019": "Open",
+      "20020": "Close",
+      "20021": "Tamper",
+      "20024": "Trigger",
+      "30000": "Changed mode to Disarm",
+      "30001": "Changed mode to Home",
+      "30002": "Changed mode to Away",
+      "30008": "Changed mode to Monitor",
+      "30030": "Turn Switch Off",
+      "30031": "Turn Switch On"
+    }
+  },
+  "observedCategoriesFromExamples": {
+    "0": "alarm sensor types such as smoke/glass/gas/siren in examples",
+    "1": "measurement sensors such as temp/humidity in examples",
+    "2": "magnetic/contact in examples",
+    "7": "motion/PIR in examples",
+    "10": "camera in examples",
+    "20": "water leakage in examples",
+    "30": "switch in examples"
+  }
+}

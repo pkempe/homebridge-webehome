@@ -1,4 +1,4 @@
-import { Service, PlatformAccessory, CharacteristicGetCallback } from 'homebridge';
+import type { Service, PlatformAccessory, CharacteristicGetCallback } from 'homebridge';
 
 import { WeBeHome } from './WeBeHomePlatform';
 import { ContactSensorState, MotionDetectionState, Sensor, SensorCategory, SensorData, SmokeDetectionState } from './WeBeHomeSensor';

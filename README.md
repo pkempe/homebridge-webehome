@@ -82,11 +82,12 @@ Useful commands:
 ```bash
 npm run build
 npm run lint
+npm test
 npm run watch
 npm audit --omit=dev
 ```
 
-There is currently no `npm test` script. For behavior changes, add focused coverage around parsing, HomeKit state mapping, and callback error paths before relying on manual Homebridge testing alone.
+The test suite is a lightweight `ts-node` runner under `tests/`. It currently covers WeBeHome response parsing, HomeKit security state mapping, callback error handling, URL encoding, and short-lived API caching.
 
 ## Project Layout
 

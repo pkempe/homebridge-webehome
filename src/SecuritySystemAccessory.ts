@@ -1,4 +1,4 @@
-import { CharacteristicGetCallback, CharacteristicSetCallback, CharacteristicValue, PlatformAccessory, Service } from 'homebridge';
+import type { CharacteristicGetCallback, CharacteristicSetCallback, CharacteristicValue, PlatformAccessory, Service } from 'homebridge';
 import { WeBeHome } from './WeBeHomePlatform';
 
 export type SecuritySystemData = {

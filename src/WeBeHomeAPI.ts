@@ -1,11 +1,39 @@
-import fetch from 'node-fetch';
-import { PlatformConfig, Logger } from 'homebridge';
+import type { PlatformConfig, Logger } from 'homebridge';
 import { URLSearchParams } from 'url';
 
 export type SecuritySystemData = {
-    uuid: string;
-    status: string;
+  uuid: string;
+  status: string;
+};
+
+type FetchResponse = {
+  ok: boolean;
+  status: number;
+  text: () => Promise<string>;
+};
+
+export type FetchClient = (url: string, options?: object) => Promise<FetchResponse>;
+
+async function defaultFetchClient(url: string, options?: object): Promise<FetchResponse> {
+  const nodeFetch = await import('node-fetch');
+  const fetchClient = nodeFetch.default as unknown as FetchClient;
+
+  return fetchClient(url, options);
+}
+
+export function parseSecuritySystemStatus(data: string): SecuritySystemData {
+  const splitResponse = data.split(':');
+  const uuid = splitResponse[1]?.trim();
+  const status = splitResponse.slice(2).join(':').trim();
+  if (!uuid || !status) {
+    throw new Error('Unexpected security system status response');
+  }
+
+  return {
+    uuid,
+    status,
   };
+}
 
 export class WeBeHomeAPI {
   private log: Logger;
@@ -21,7 +49,7 @@ export class WeBeHomeAPI {
   private securitySystemLastFetched = 0;
   private securitySystemCache: SecuritySystemData | null = null;
 
-  constructor(log: Logger, config: PlatformConfig) {
+  constructor(log: Logger, config: PlatformConfig, private readonly fetchClient: FetchClient = defaultFetchClient) {
     this.log = log;
     this.config = config;
     this.login = config['login'];
@@ -73,7 +101,7 @@ export class WeBeHomeAPI {
 
 
   private async fetchData(url: string, options: object): Promise<string | null> {
-    const response = await fetch(url, options);
+    const response = await this.fetchClient(url, options);
     if (!response.ok) {
       throw new Error(`HTTP error! Status: ${response.status}`);
     }
@@ -105,24 +133,13 @@ export class WeBeHomeAPI {
       },
     };
 
-    const response = await fetch(url, options);
+    const response = await this.fetchClient(url, options);
     if (!response.ok) {
       throw new Error(`HTTP error! Status: ${response.status}`);
     }
     const data = await response.text();
 
-    const splitResponse = data.split(':');
-    const uuid = splitResponse[1]?.trim();
-    const status = splitResponse.slice(2).join(':').trim();
-    if (!uuid || !status) {
-      throw new Error('Unexpected security system status response');
-    }
-
-    // Now you can create your dictionary
-    const result: SecuritySystemData = {
-      uuid,
-      status,
-    };
+    const result = parseSecuritySystemStatus(data);
 
     this.securitySystemCache = result;
     this.securitySystemLastFetched = Date.now();
@@ -138,7 +155,7 @@ export class WeBeHomeAPI {
       ActionOnly: 'yes',
     });
 
-    const response = await fetch(url, { method: 'POST' });
+    const response = await this.fetchClient(url, { method: 'POST' });
 
     if (!response.ok) {
       throw new Error(`Failed to set state. Server responded with ${response.status}`);

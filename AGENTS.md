@@ -20,10 +20,11 @@ Use these checks before handing off code changes:
 ```bash
 npm run build
 npm run lint
+npm test
 npm audit --omit=dev
 ```
 
-There is no `npm test` script yet. If behavior gets more complex, add focused tests for parsing, state mapping, and HomeKit callback error handling.
+The test suite uses `ts-node tests/run-tests.ts` with Node's built-in `assert/strict`. Keep adding focused tests for parsing, state mapping, URL construction, API caching, and HomeKit callback error handling.
 
 ## Architecture
 

@@ -1,4 +1,4 @@
-import { Logger } from 'homebridge';
+import type { Logger } from 'homebridge';
 
 export enum TitleKey {
 	BUID = 'BUID',

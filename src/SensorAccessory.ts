@@ -94,18 +94,22 @@ export class SensorAccessory {
   }
 
   handleContactSensorStateGet(): CharacteristicValue {
+    this.requestFreshState();
     return this.contactSensorState();
   }
 
   handleMotionSensorStateGet(): CharacteristicValue {
+    this.requestFreshState();
     return this.sensor.getState() === MotionDetectionState.Detected;
   }
 
   handleSmokeDetectedGet(): CharacteristicValue {
+    this.requestFreshState();
     return this.smokeDetectedState();
   }
 
   handleStatusLowBatteryGet(): CharacteristicValue {
+    this.requestFreshState();
     return this.statusLowBatteryState();
   }
 
@@ -142,6 +146,10 @@ export class SensorAccessory {
     return this.sensor.hasLowBattery() ?
       this.platform.Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW :
       this.platform.Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL;
+  }
+
+  private requestFreshState() {
+    void this.platform.requestSensorRefresh(this.sensor.suid);
   }
 
 }

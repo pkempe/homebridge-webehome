@@ -72,6 +72,7 @@ export class SecuritySystemAccessory {
 
   handleSecuritySystemStateGet(): CharacteristicValue {
     try {
+      this.requestFreshState();
       const state = this.mapServerStateToHomebridgeState(this.statusDict.status);
       this.platform.log.debug('Current state of security system:', state);
       return state;
@@ -83,6 +84,7 @@ export class SecuritySystemAccessory {
 
   handleSecuritySystemTargetStateGet(): CharacteristicValue {
     try {
+      this.requestFreshState();
       return this.mapServerStateToHomebridgeTargetState(this.statusDict.status);
     } catch (error) {
       this.platform.log.error('Failed to get security system target state:', error);
@@ -99,7 +101,7 @@ export class SecuritySystemAccessory {
       const action = this.mapTargetStateToAction(newValue);
       await this.platform.setStateForSecuritySystem(action);
       this.service.updateCharacteristic(this.platform.Characteristic.SecuritySystemTargetState, newValue);
-      await this.platform.refreshSecuritySystem();
+      await this.platform.refreshSecuritySystem(true);
     } catch (error) {
       this.platform.log.error('Failed to set security system state:', error);
       throw this.communicationError();
@@ -170,6 +172,10 @@ export class SecuritySystemAccessory {
 
   private communicationError(): Error {
     return new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+  }
+
+  private requestFreshState() {
+    void this.platform.requestSecuritySystemRefresh();
   }
 
 }

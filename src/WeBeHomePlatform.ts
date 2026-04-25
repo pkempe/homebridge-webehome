@@ -4,7 +4,7 @@ import type { API, DynamicPlatformPlugin, Logger,
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings';
 import { SensorAccessory } from './SensorAccessory';
 import { SecuritySystemData, WeBeHomeAPI } from './WeBeHomeAPI';
-import { Sensor, SensorCategory, SensorData, TitleKey, parseAllDeviceData } from './WeBeHomeSensor';
+import { Sensor, SensorCategory, SensorData, TitleKey, hasParseableDeviceRows, parseAllDeviceData } from './WeBeHomeSensor';
 import { SecuritySystemAccessory } from './SecuritySystemAccessory';
 
 /**
@@ -22,10 +22,17 @@ export class WeBeHome implements DynamicPlatformPlugin {
   private readonly webehomeapi?: WeBeHomeAPI;
   private readonly sensorAccessories = new Map<number, SensorAccessory>();
   private readonly pollIntervalMs = 30_000;
+  private readonly rediscoveryIntervalMs = 300_000;
+  private readonly accessRefreshCooldownMs = 5_000;
   private securitySystemAccessory?: SecuritySystemAccessory;
   private securitySystemAccessoryUuid?: string;
   private statusPollTimer?: NodeJS.Timeout;
+  private rediscoveryPollTimer?: NodeJS.Timeout;
   private refreshInProgress = false;
+  private readonly sensorAccessRefreshes = new Map<number, Promise<void>>();
+  private readonly sensorAccessRefreshLastAttempt = new Map<number, number>();
+  private securitySystemAccessRefresh?: Promise<void>;
+  private securitySystemAccessRefreshLastAttempt = 0;
 
   constructor(
     public readonly log: Logger,
@@ -85,22 +92,29 @@ export class WeBeHome implements DynamicPlatformPlugin {
   }
 
   private startPolling() {
-    if (this.statusPollTimer) {
-      return;
+    if (!this.statusPollTimer) {
+      this.statusPollTimer = setInterval(() => {
+        void this.refreshAccessories();
+      }, this.pollIntervalMs);
     }
 
-    this.statusPollTimer = setInterval(() => {
-      void this.refreshAccessories();
-    }, this.pollIntervalMs);
+    if (!this.rediscoveryPollTimer) {
+      this.rediscoveryPollTimer = setInterval(() => {
+        void this.rediscoverAccessories();
+      }, this.rediscoveryIntervalMs);
+    }
   }
 
   private stopPolling() {
-    if (!this.statusPollTimer) {
-      return;
+    if (this.statusPollTimer) {
+      clearInterval(this.statusPollTimer);
+      this.statusPollTimer = undefined;
     }
 
-    clearInterval(this.statusPollTimer);
-    this.statusPollTimer = undefined;
+    if (this.rediscoveryPollTimer) {
+      clearInterval(this.rediscoveryPollTimer);
+      this.rediscoveryPollTimer = undefined;
+    }
   }
 
   private async refreshAccessories() {
@@ -110,8 +124,24 @@ export class WeBeHome implements DynamicPlatformPlugin {
 
     this.refreshInProgress = true;
     try {
-      await this.discoverSensors(false);
-      await this.discoverSecuritySystem(false);
+      await Promise.allSettled([
+        this.refreshSensors(),
+        this.refreshSecuritySystem(),
+      ]);
+    } finally {
+      this.refreshInProgress = false;
+    }
+  }
+
+  private async rediscoverAccessories() {
+    if (this.refreshInProgress) {
+      return;
+    }
+
+    this.refreshInProgress = true;
+    try {
+      await this.discoverSensors();
+      await this.discoverSecuritySystem();
     } finally {
       this.refreshInProgress = false;
     }
@@ -124,27 +154,11 @@ export class WeBeHome implements DynamicPlatformPlugin {
 
     // Setup the sensors
     try {
-      // Fetch the status from the server
-      const data = await this.webehomeapi.fetchStatus();
-
-      if (data === null) {
-        this.log.warn('Could not fetch data from server. No sensors will be discovered.');
+      const sensorDataArray = await this.fetchSupportedSensorData();
+      if (!sensorDataArray) {
         return;
       }
 
-      // Parse the server response into an array of device data objects
-      const deviceDataArray = parseAllDeviceData(data);
-
-      // Filter the device data array and create a new Sensor object from each element
-      const sensorDataArray = deviceDataArray.filter(deviceData =>
-        deviceData[TitleKey.DESCR] !== '' &&
-        deviceData[TitleKey.DESCR] !== undefined &&
-        deviceData[TitleKey.CAT] !== undefined &&
-        // Stänger av rörelsedetektorer tills vidare
-        // [SensorCategory.ContactSensor, SensorCategory.MotionDetector, SensorCategory.SmokeDetector]
-        [SensorCategory.ContactSensor, SensorCategory.SmokeDetector]
-          .includes(parseInt(deviceData[TitleKey.CAT]!)),
-      );
       const seenSensorUuids = new Set<string>();
 
       // const special = deviceDataArray.filter(deviceData => deviceData[TitleKey.SUID] === '99646');
@@ -205,6 +219,66 @@ export class WeBeHome implements DynamicPlatformPlugin {
     } catch (error) {
       this.log.error('Failed to fetch status:', error);
     }
+  }
+
+  async refreshSensors(forceRefresh = false): Promise<void> {
+    try {
+      const sensorDataArray = await this.fetchSupportedSensorData(forceRefresh);
+      if (!sensorDataArray) {
+        return;
+      }
+
+      let updatedSensors = 0;
+      for (const sensorData of sensorDataArray) {
+        const suid = parseInt(sensorData[TitleKey.SUID] || '0');
+        const sensorAccessory = this.sensorAccessories.get(suid);
+        if (sensorAccessory) {
+          sensorAccessory.updateSensor(sensorData);
+          updatedSensors++;
+        }
+      }
+
+      this.log.debug('Did finish refreshing', updatedSensors, 'known sensors');
+    } catch (error) {
+      this.log.error('Failed to refresh sensors:', error);
+    }
+  }
+
+  async refreshSensor(suid: number, forceRefresh = false): Promise<void> {
+    const sensorAccessory = this.sensorAccessories.get(suid);
+    if (!sensorAccessory) {
+      return;
+    }
+
+    try {
+      const sensorData = await this.fetchStatusForSensor(suid, forceRefresh);
+      if (sensorData) {
+        sensorAccessory.updateSensor(sensorData);
+      }
+    } catch (error) {
+      this.log.error('Failed to refresh sensor:', suid, error);
+    }
+  }
+
+  requestSensorRefresh(suid: number): Promise<void> {
+    const existingRefresh = this.sensorAccessRefreshes.get(suid);
+    if (existingRefresh) {
+      return existingRefresh;
+    }
+
+    const now = Date.now();
+    const lastAttempt = this.sensorAccessRefreshLastAttempt.get(suid) || 0;
+    if (now - lastAttempt < this.accessRefreshCooldownMs) {
+      return Promise.resolve();
+    }
+
+    this.sensorAccessRefreshLastAttempt.set(suid, now);
+    const refresh = this.refreshSensor(suid, true).finally(() => {
+      this.sensorAccessRefreshes.delete(suid);
+    });
+    this.sensorAccessRefreshes.set(suid, refresh);
+
+    return refresh;
   }
 
   async discoverSecuritySystem(removeStaleAccessories = true) {
@@ -269,18 +343,47 @@ export class WeBeHome implements DynamicPlatformPlugin {
     }
   }
 
-  async refreshSecuritySystem(): Promise<void> {
-    await this.discoverSecuritySystem(false);
+  async refreshSecuritySystem(forceRefresh = false): Promise<void> {
+    if (!this.webehomeapi) {
+      return;
+    }
+
+    try {
+      const statusDict = await this.webehomeapi.fetchSecuritySystemStatus(forceRefresh);
+      if (this.securitySystemAccessory) {
+        this.securitySystemAccessory.updateStatus(statusDict);
+      }
+    } catch (error) {
+      this.log.error('Failed to refresh security system status:', error);
+    }
   }
 
-  async fetchStatusForSensor(suid: number): Promise<SensorData | null> {
+  requestSecuritySystemRefresh(): Promise<void> {
+    if (this.securitySystemAccessRefresh) {
+      return this.securitySystemAccessRefresh;
+    }
+
+    const now = Date.now();
+    if (now - this.securitySystemAccessRefreshLastAttempt < this.accessRefreshCooldownMs) {
+      return Promise.resolve();
+    }
+
+    this.securitySystemAccessRefreshLastAttempt = now;
+    this.securitySystemAccessRefresh = this.refreshSecuritySystem(true).finally(() => {
+      this.securitySystemAccessRefresh = undefined;
+    });
+
+    return this.securitySystemAccessRefresh;
+  }
+
+  async fetchStatusForSensor(suid: number, forceRefresh = false): Promise<SensorData | null> {
     if (!this.webehomeapi) {
       this.log.warn(`Cannot fetch sensor ${suid}; WeBeHome Full is not configured.`);
       return null;
     }
 
     // Fetch the status from the server
-    const data = await this.webehomeapi.fetchStatus();
+    const data = await this.webehomeapi.fetchStatus(forceRefresh);
 
     if (data === null) {
       this.log.warn(`No data fetched for sensor ${suid}`);
@@ -296,14 +399,14 @@ export class WeBeHome implements DynamicPlatformPlugin {
     return sensorData || null;
   }
 
-  async fetchStatusForSecuritySystem(): Promise<SecuritySystemData | null > {
+  async fetchStatusForSecuritySystem(forceRefresh = false): Promise<SecuritySystemData | null > {
     if (!this.webehomeapi) {
       this.log.warn('Cannot fetch security system status; WeBeHome Full is not configured.');
       return null;
     }
 
     // Fetch the status from the server
-    const data = await this.webehomeapi.fetchSecuritySystemStatus();
+    const data = await this.webehomeapi.fetchSecuritySystemStatus(forceRefresh);
     return data;
   }
 
@@ -313,6 +416,38 @@ export class WeBeHome implements DynamicPlatformPlugin {
     }
 
     await this.webehomeapi.setSecuritySystemTargetState(action);
+  }
+
+  private async fetchSupportedSensorData(forceRefresh = false): Promise<SensorData[] | null> {
+    if (!this.webehomeapi) {
+      return null;
+    }
+
+    // Fetch the status from the server
+    const data = await this.webehomeapi.fetchStatus(forceRefresh);
+
+    if (data === null) {
+      this.log.warn('Could not fetch data from server. No sensors will be discovered.');
+      return null;
+    }
+
+    // Parse the server response into an array of device data objects
+    const deviceDataArray = parseAllDeviceData(data);
+    if (!hasParseableDeviceRows(deviceDataArray)) {
+      this.log.warn('WeBeHome sensor status response did not contain parseable device rows. Skipping sensor updates.');
+      return null;
+    }
+
+    // Filter the device data array and create a new Sensor object from each element
+    return deviceDataArray.filter(deviceData =>
+      deviceData[TitleKey.DESCR] !== '' &&
+      deviceData[TitleKey.DESCR] !== undefined &&
+      deviceData[TitleKey.CAT] !== undefined &&
+      // Stänger av rörelsedetektorer tills vidare
+      // [SensorCategory.ContactSensor, SensorCategory.MotionDetector, SensorCategory.SmokeDetector]
+      [SensorCategory.ContactSensor, SensorCategory.SmokeDetector]
+        .includes(parseInt(deviceData[TitleKey.CAT]!)),
+    );
   }
 
   private removeStaleSensorAccessories(activeUuids: Set<string>) {

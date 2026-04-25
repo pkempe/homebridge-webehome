@@ -24,14 +24,14 @@ npm test
 npm audit --omit=dev
 ```
 
-The test suite uses `ts-node tests/run-tests.ts` with Node's built-in `assert/strict`. Keep adding focused tests for parsing, state mapping, URL construction, API caching, and HomeKit promise-handler error handling.
+The test suite uses `ts-node tests/run-tests.ts` with Node's built-in `assert/strict`. Keep adding focused tests for parsing, state mapping, URL construction, API caching, request coalescing, timeout/backoff behavior, and HomeKit promise-handler error handling.
 
 ## Architecture
 
 - `src/index.ts` registers the platform with Homebridge.
 - `src/settings.ts` owns `PLATFORM_NAME` and `PLUGIN_NAME`.
-- `src/WeBeHomePlatform.ts` discovers sensors/security system accessories, restores cached Homebridge accessories, polls WeBeHome status, and removes stale cached accessories after successful startup discovery.
-- `src/WeBeHomeAPI.ts` calls the WeBeHome HTTP endpoints and caches responses for five seconds.
+- `src/WeBeHomePlatform.ts` discovers sensors/security system accessories, restores cached Homebridge accessories, refreshes known accessories, runs periodic rediscovery, and removes stale cached accessories after successful discovery.
+- `src/WeBeHomeAPI.ts` calls the WeBeHome HTTP endpoints, caches responses for five seconds, coalesces in-flight requests, and applies timeout/backoff behavior.
 - `src/SensorAccessory.ts` maps WeBeHome sensor rows to HomeKit sensor characteristics.
 - `src/SecuritySystemAccessory.ts` maps WeBeHome alarm state and HomeKit target state actions.
 - `src/WeBeHomeSensor.ts` parses the WeBeHome pipe-delimited sensor status response.
@@ -57,8 +57,8 @@ Use HomeKit enum values for enum characteristics. Do not return plain booleans f
 
 - Keep credential-bearing URLs out of logs.
 - Build WeBeHome URLs with `URLSearchParams`; usernames and passwords may contain reserved URL characters.
-- HomeKit handlers use Homebridge's promise-style `.onGet()` / `.onSet()` APIs. Keep `.onGet()` fast by returning cached state; do network refreshes in the platform polling path and push updates with `updateCharacteristic`.
-- Keep the short-lived API cache behavior in mind when debugging repeated HomeKit reads.
+- HomeKit handlers use Homebridge's promise-style `.onGet()` / `.onSet()` APIs. Keep `.onGet()` fast by returning cached state, but request an on-access refresh so opening an accessory still attempts to pull fresh WeBeHome state.
+- Keep the short-lived API cache, on-access refresh cooldown, in-flight coalescing, and timeout/backoff behavior in mind when debugging repeated HomeKit reads.
 - Do not enable motion sensors until the actual WeBeHome motion status values are verified against real data.
 - `dist/` is generated and ignored; do not commit it unless project policy changes.
 

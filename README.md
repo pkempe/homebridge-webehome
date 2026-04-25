@@ -57,11 +57,13 @@ Add the platform to the Homebridge `platforms` array:
   "platform": "WeBeHome Full",
   "name": "WeBeHome",
   "login": "your-webehome-username",
-  "password": "your-webehome-password"
+  "password": "your-webehome-password",
+  "requestTimeoutMs": 15000
 }
 ```
 
 The plugin alias must be `WeBeHome Full`; that value is registered in `src/settings.ts` and `config.schema.json`.
+`requestTimeoutMs` is optional and defaults to 15000.
 
 ## How It Works
 
@@ -73,9 +75,11 @@ On Homebridge startup, the platform waits for `didFinishLaunching`, then:
 4. Fetches detailed alarm status from `https://webehome.com/Public/login.aspx`.
 5. Registers or restores the security system accessory.
 
-After startup, the platform refreshes WeBeHome status in the background and pushes changes to HomeKit with `updateCharacteristic`. HomeKit `onGet` handlers return the latest cached value so reads stay fast, while WeBeHome HTTP responses still use a five-second API cache to avoid hammering the endpoints when several values are refreshed together.
+After startup, the platform refreshes known WeBeHome accessories in the background and pushes changes to HomeKit with `updateCharacteristic`. A slower rediscovery pass can add newly supported sensors or remove stale cached accessories without requiring a Homebridge restart.
 
-Cached Homebridge accessories that no longer appear in a successful startup discovery are removed automatically. Polling can add newly discovered supported sensors without requiring a Homebridge restart.
+HomeKit `onGet` handlers return the latest cached value so reads stay fast, and also request a fresh WeBeHome refresh in the background when the accessory is opened. These on-access refreshes are coalesced and lightly throttled so HomeKit reading several characteristics does not create a burst of duplicate calls.
+
+WeBeHome HTTP requests have a timeout and short failure backoff. Sensor status and security status requests are also coalesced while an identical fetch is already in flight.
 
 ## Development
 
@@ -89,14 +93,14 @@ npm run watch
 npm audit --omit=dev
 ```
 
-The test suite is a lightweight `ts-node` runner under `tests/`. It currently covers WeBeHome response parsing, HomeKit security state mapping, promise-handler error handling, URL encoding, and short-lived API caching.
+The test suite is a lightweight `ts-node` runner under `tests/`. It currently covers WeBeHome response parsing, HomeKit security state mapping, promise-handler error handling, URL encoding, short-lived API caching, request coalescing, timeout aborts, and failure backoff.
 
 ## Project Layout
 
 - `src/index.ts` registers the Homebridge platform.
 - `src/settings.ts` defines the Homebridge platform alias and plugin name.
-- `src/WeBeHomePlatform.ts` handles discovery, cached accessory restoration, and platform-level API calls.
-- `src/WeBeHomeAPI.ts` wraps the WeBeHome HTTP endpoints and short-lived response cache.
+- `src/WeBeHomePlatform.ts` handles discovery, cached accessory restoration, background refresh, and platform-level API calls.
+- `src/WeBeHomeAPI.ts` wraps the WeBeHome HTTP endpoints, short-lived response cache, request timeout, coalescing, and failure backoff.
 - `src/SensorAccessory.ts` exposes sensor characteristics to HomeKit.
 - `src/SecuritySystemAccessory.ts` exposes alarm state and target-state actions to HomeKit.
 - `src/WeBeHomeSensor.ts` parses and models WeBeHome sub-unit status rows.

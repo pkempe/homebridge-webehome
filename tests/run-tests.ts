@@ -3,7 +3,15 @@ import assert from 'assert/strict';
 
 import { SensorAccessory } from '../src/SensorAccessory';
 import { SecuritySystemAccessory, ServerState } from '../src/SecuritySystemAccessory';
-import { ContactSensorState, LowBattery, Sensor, SensorCategory, TitleKey, parseAllDeviceData } from '../src/WeBeHomeSensor';
+import {
+  ContactSensorState,
+  LowBattery,
+  Sensor,
+  SensorCategory,
+  TitleKey,
+  hasParseableDeviceRows,
+  parseAllDeviceData,
+} from '../src/WeBeHomeSensor';
 import { WeBeHomeAPI, parseSecuritySystemStatus } from '../src/WeBeHomeAPI';
 import type { FetchClient } from '../src/WeBeHomeAPI';
 
@@ -15,6 +23,11 @@ type TestCase = {
 type FetchCall = {
   url: string;
   options?: unknown;
+};
+
+type Deferred<T> = {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
 };
 
 const tests: TestCase[] = [];
@@ -131,6 +144,7 @@ class FakeSmokeSensorService extends FakeService {}
 function sensorPlatform() {
   const accessoryInformation = new FakeAccessoryInformationService();
   const services: FakeService[] = [];
+  const requestedRefreshes: number[] = [];
   const accessory = {
     context: {},
     addService: (service: FakeService) => {
@@ -151,11 +165,16 @@ function sensorPlatform() {
       SmokeSensor: FakeSmokeSensorService,
     },
     log: fakeLog(),
+    requestSensorRefresh: (suid: number) => {
+      requestedRefreshes.push(suid);
+      return Promise.resolve();
+    },
   };
 
   return {
     accessory,
     platform,
+    requestedRefreshes,
     services,
   };
 }
@@ -181,6 +200,7 @@ function securitySystemAccessory(platformOverrides = {}) {
       },
       log: fakeLog(),
       refreshSecuritySystem: async () => undefined,
+      requestSecuritySystemRefresh: async () => undefined,
       setStateForSecuritySystem: async () => undefined,
       ...platformOverrides,
     },
@@ -214,6 +234,22 @@ function fetchClient(responseText: string, calls: FetchCall[] = [], ok = true) {
   return client;
 }
 
+function deferred<T>(): Deferred<T> {
+  let resolve: (value: T) => void = () => undefined;
+  const promise = new Promise<T>(promiseResolve => {
+    resolve = promiseResolve;
+  });
+
+  return {
+    promise,
+    resolve,
+  };
+}
+
+function fetchMethod(options: unknown): string | undefined {
+  return (options as { method?: string } | undefined)?.method;
+}
+
 test('parseAllDeviceData maps WeBeHome rows by title key', () => {
   const data = sensorData({
     [TitleKey.SUID]: '456',
@@ -226,6 +262,14 @@ test('parseAllDeviceData maps WeBeHome rows by title key', () => {
   assert.equal(parsed[0][TitleKey.SUID], '456');
   assert.equal(parsed[0][TitleKey.DESCR], 'Kitchen smoke');
   assert.equal(parsed[0][TitleKey.CAT], '300');
+});
+
+test('hasParseableDeviceRows rejects malformed responses before stale cleanup', () => {
+  assert.equal(hasParseableDeviceRows(parseAllDeviceData('login failed')), false);
+  assert.equal(hasParseableDeviceRows(parseAllDeviceData('headers</br>')), false);
+  assert.equal(hasParseableDeviceRows(parseAllDeviceData(`headers</br>${row(sensorData({
+    [TitleKey.CAT]: SensorCategory.Keypad.toString(),
+  }))}`)), true);
 });
 
 test('Sensor.updateState refreshes state and low-battery fields', () => {
@@ -241,13 +285,14 @@ test('Sensor.updateState refreshes state and low-battery fields', () => {
 });
 
 test('SensorAccessory returns cached contact and battery states', () => {
-  const { accessory, platform, services } = sensorPlatform();
+  const { accessory, platform, requestedRefreshes, services } = sensorPlatform();
   const sensor = new Sensor(fakeLog() as never, sensorData());
   const sensorAccessory = new SensorAccessory(platform as never, accessory as never, sensor);
 
   assert.equal(services.length, 1);
   assert.equal(sensorAccessory.handleContactSensorStateGet(), fakeCharacteristic.ContactSensorState.CONTACT_DETECTED);
   assert.equal(sensorAccessory.handleStatusLowBatteryGet(), fakeCharacteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL);
+  assert.deepEqual(requestedRefreshes, [123, 123]);
 
   sensorAccessory.updateSensor(sensorData({
     [TitleKey.LastSignal]: LowBattery.LowBattery,
@@ -293,6 +338,19 @@ test('SecuritySystemAccessory maps WeBeHome and HomeKit states', () => {
   assert.equal(accessory.mapTargetStateToAction(fakeCharacteristic.SecuritySystemTargetState.AWAY_ARM), 'away');
   assert.equal(accessory.mapTargetStateToAction(fakeCharacteristic.SecuritySystemTargetState.STAY_ARM), 'home');
   assert.equal(accessory.mapTargetStateToAction(fakeCharacteristic.SecuritySystemTargetState.NIGHT_ARM), 'home');
+});
+
+test('SecuritySystemAccessory get handlers request a fresh status refresh', () => {
+  let refreshRequests = 0;
+  const accessory = securitySystemAccessory({
+    requestSecuritySystemRefresh: async () => {
+      refreshRequests++;
+    },
+  });
+
+  assert.equal(accessory.handleSecuritySystemStateGet(), fakeCharacteristic.SecuritySystemCurrentState.DISARMED);
+  assert.equal(accessory.handleSecuritySystemTargetStateGet(), fakeCharacteristic.SecuritySystemTargetState.DISARM);
+  assert.equal(refreshRequests, 2);
 });
 
 test('SecuritySystemAccessory set handler resolves on success and rejects on failure', async () => {
@@ -359,8 +417,92 @@ test('WeBeHomeAPI fetches security status and posts target actions', async () =>
 
   assert.equal(calls.length, 3);
   assert.match(calls[1].url, /Action=away/);
-  assert.deepEqual(calls[1].options, { method: 'POST' });
+  assert.equal(fetchMethod(calls[1].options), 'POST');
   assert.match(calls[2].url, /Action=statusdetailed/);
+});
+
+test('WeBeHomeAPI coalesces concurrent security status fetches', async () => {
+  const calls: FetchCall[] = [];
+  const unblock = deferred<void>();
+  const client = (async (url: string, options?: unknown) => {
+    calls.push({ url, options });
+    await unblock.promise;
+    return {
+      ok: true,
+      status: 200,
+      text: async () => 'Status:alarm-uuid:Avlarmat',
+    };
+  }) as FetchClient;
+  const api = new WeBeHomeAPI(fakeLog() as never, {
+    login: 'login',
+    password: 'password',
+  } as never, client);
+
+  const first = api.fetchSecuritySystemStatus(true);
+  const second = api.fetchSecuritySystemStatus(true);
+
+  assert.equal(calls.length, 1);
+  unblock.resolve();
+  assert.deepEqual(await Promise.all([first, second]), [
+    {
+      uuid: 'alarm-uuid',
+      status: ServerState.Disarmed,
+    },
+    {
+      uuid: 'alarm-uuid',
+      status: ServerState.Disarmed,
+    },
+  ]);
+});
+
+test('WeBeHomeAPI backs off after repeated request failures', async () => {
+  const calls: FetchCall[] = [];
+  const api = new WeBeHomeAPI(fakeLog() as never, {
+    login: 'login',
+    password: 'password',
+  } as never, fetchClient('', calls, false));
+
+  await assert.rejects(() => api.fetchStatus(true), /HTTP error/);
+  await assert.rejects(() => api.fetchStatus(true), /HTTP error/);
+  await assert.rejects(() => api.fetchStatus(true), /backoff/);
+
+  assert.equal(calls.length, 2);
+});
+
+test('WeBeHomeAPI security status backoff does not block target actions', async () => {
+  const calls: FetchCall[] = [];
+  const api = new WeBeHomeAPI(fakeLog() as never, {
+    login: 'login',
+    password: 'password',
+  } as never, (async (url: string, options?: unknown) => {
+    calls.push({ url, options });
+    const isAction = url.includes('Action=away');
+    return {
+      ok: isAction,
+      status: isAction ? 200 : 500,
+      text: async () => '',
+    };
+  }) as FetchClient);
+
+  await assert.rejects(() => api.fetchSecuritySystemStatus(true), /HTTP error/);
+  await assert.rejects(() => api.fetchSecuritySystemStatus(true), /HTTP error/);
+  await api.setSecuritySystemTargetState('away');
+
+  assert.equal(calls.length, 3);
+  assert.equal(fetchMethod(calls[2].options), 'POST');
+});
+
+test('WeBeHomeAPI aborts slow requests after the configured timeout', async () => {
+  const api = new WeBeHomeAPI(fakeLog() as never, {
+    login: 'login',
+    password: 'password',
+    requestTimeoutMs: 1,
+  } as never, ((url: string, options?: unknown) => new Promise((_resolve, reject) => {
+    const signal = (options as { signal?: AbortSignal } | undefined)?.signal;
+    signal?.addEventListener('abort', () => reject(new Error(`aborted ${url}`)));
+  })) as FetchClient);
+
+  await assert.rejects(() => api.fetchStatus(true), /aborted/);
 });
 
 async function run() {

@@ -25,6 +25,14 @@
         "title": "Password",
         "type": "string",
         "format": "password"
+      },
+      "requestTimeoutMs": {
+        "title": "Request Timeout",
+        "type": "integer",
+        "default": 15000,
+        "minimum": 1000,
+        "maximum": 60000,
+        "description": "How long to wait for a WeBeHome HTTP request before aborting it."
       }
     }
   }

@@ -145,3 +145,19 @@ export function parseAllDeviceData(allDeviceData: string): SensorData[] {
 
   return parsedRows;
 }
+
+export function hasParseableDeviceRows(deviceDataArray: SensorData[]): boolean {
+  return deviceDataArray.some(deviceData =>
+    isPositiveIntegerString(deviceData[TitleKey.SUID]) &&
+    isPositiveIntegerString(deviceData[TitleKey.CAT]),
+  );
+}
+
+function isPositiveIntegerString(value: string | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+
+  const parsedValue = Number.parseInt(value, 10);
+  return Number.isInteger(parsedValue) && parsedValue > 0;
+}

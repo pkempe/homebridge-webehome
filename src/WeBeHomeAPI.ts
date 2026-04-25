@@ -15,11 +15,19 @@ type FetchResponse = {
 export type FetchOptions = {
   method?: string;
   headers?: Record<string, string>;
+  signal?: AbortSignal;
 };
 
 export type FetchClient = (url: string, options?: FetchOptions) => Promise<FetchResponse>;
 
 const defaultFetchClient: FetchClient = (url, options) => fetch(url, options);
+
+type RequestKind = 'sensor' | 'security status' | 'security action';
+
+type RequestState = {
+  failureCount: number;
+  backoffUntil: number;
+};
 
 export function parseSecuritySystemStatus(data: string): SecuritySystemData {
   const splitResponse = data.split(':');
@@ -42,18 +50,38 @@ export class WeBeHomeAPI {
   private password: string;
 
   private fetching: Promise<string | null> | null = null;
+  private securitySystemFetching: Promise<SecuritySystemData> | null = null;
 
   private readonly throttleTime = 5000; // 5000 milliseconds = 5 seconds
+  private readonly requestTimeoutMs: number;
+  private readonly backoffAfterFailures = 2;
+  private readonly initialBackoffMs = 10_000;
+  private readonly maxBackoffMs = 120_000;
   private lastFetched = 0;
   private cache: string | null = null;
   private securitySystemLastFetched = 0;
   private securitySystemCache: SecuritySystemData | null = null;
+  private readonly requestStates: Record<RequestKind, RequestState> = {
+    sensor: {
+      failureCount: 0,
+      backoffUntil: 0,
+    },
+    'security status': {
+      failureCount: 0,
+      backoffUntil: 0,
+    },
+    'security action': {
+      failureCount: 0,
+      backoffUntil: 0,
+    },
+  };
 
   constructor(log: Logger, config: PlatformConfig, private readonly fetchClient: FetchClient = defaultFetchClient) {
     this.log = log;
     this.config = config;
     this.login = config['login'];
     this.password = config['password'];
+    this.requestTimeoutMs = this.parsePositiveNumber(config['requestTimeoutMs'], 15_000);
   }
 
   private buildUrl(baseUrl: string, params: Record<string, string>): string {
@@ -66,11 +94,11 @@ export class WeBeHomeAPI {
     return `${baseUrl}?${query.toString()}`;
   }
 
-  async fetchStatus(): Promise<string | null> {
+  async fetchStatus(forceRefresh = false): Promise<string | null> {
     const now = Date.now();
 
     // If it's been less than 5 seconds since the last fetch, return the cached data
-    if (now - this.lastFetched < this.throttleTime && this.cache !== null) {
+    if (!forceRefresh && now - this.lastFetched < this.throttleTime && this.cache !== null) {
     //   this.log.debug('Returning cached sensor status');
       return this.cache;
     }
@@ -92,7 +120,7 @@ export class WeBeHomeAPI {
     };
 
     // Save the promise so other calls can use it
-    this.fetching = this.fetchData(url, options).finally(() => {
+    this.fetching = this.fetchData(url, options, 'sensor').finally(() => {
       this.fetching = null;
     });
 
@@ -100,12 +128,8 @@ export class WeBeHomeAPI {
   }
 
 
-  private async fetchData(url: string, options: FetchOptions): Promise<string | null> {
-    const response = await this.fetchClient(url, options);
-    if (!response.ok) {
-      throw new Error(`HTTP error! Status: ${response.status}`);
-    }
-    const data = await response.text();
+  private async fetchData(url: string, options: FetchOptions, requestKind: RequestKind): Promise<string | null> {
+    const data = await this.fetchText(url, options, requestKind);
 
     this.lastFetched = Date.now();
     return this.cache = data;
@@ -118,6 +142,10 @@ export class WeBeHomeAPI {
       // If it's been less than 5 seconds since the last fetch, return the cached data
     //   this.log.debug('Returning cached sensor status');
       return this.securitySystemCache;
+    }
+
+    if (this.securitySystemFetching) {
+      return this.securitySystemFetching;
     }
 
     // If it's been more than 5 seconds since the last fetch, fetch new data
@@ -133,11 +161,15 @@ export class WeBeHomeAPI {
       },
     };
 
-    const response = await this.fetchClient(url, options);
-    if (!response.ok) {
-      throw new Error(`HTTP error! Status: ${response.status}`);
-    }
-    const data = await response.text();
+    this.securitySystemFetching = this.fetchSecuritySystemData(url, options).finally(() => {
+      this.securitySystemFetching = null;
+    });
+
+    return this.securitySystemFetching;
+  }
+
+  private async fetchSecuritySystemData(url: string, options: FetchOptions): Promise<SecuritySystemData> {
+    const data = await this.fetchText(url, options, 'security status');
 
     const result = parseSecuritySystemStatus(data);
 
@@ -155,13 +187,78 @@ export class WeBeHomeAPI {
       ActionOnly: 'yes',
     });
 
-    const response = await this.fetchClient(url, { method: 'POST' });
-
-    if (!response.ok) {
-      throw new Error(`Failed to set state. Server responded with ${response.status}`);
-    }
+    await this.fetchText(url, { method: 'POST' }, 'security action');
 
     this.securitySystemCache = null;
     this.securitySystemLastFetched = 0;
+  }
+
+  private async fetchText(url: string, options: FetchOptions, requestKind: RequestKind): Promise<string> {
+    this.throwIfBackedOff(requestKind);
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.requestTimeoutMs);
+
+    try {
+      const response = await this.fetchClient(url, {
+        ...options,
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP error! Status: ${response.status}`);
+      }
+
+      const data = await response.text();
+      this.recordSuccess(requestKind);
+      return data;
+    } catch (error) {
+      this.recordFailure(requestKind);
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private throwIfBackedOff(requestKind: RequestKind) {
+    const state = this.requestStates[requestKind];
+    const now = Date.now();
+
+    if (now < state.backoffUntil) {
+      const remainingSeconds = Math.ceil((state.backoffUntil - now) / 1000);
+      throw new Error(`Skipping WeBeHome ${requestKind} request during backoff (${remainingSeconds}s remaining)`);
+    }
+  }
+
+  private recordSuccess(requestKind: RequestKind) {
+    const state = this.requestStates[requestKind];
+    if (state.failureCount > 0) {
+      this.log.debug(`WeBeHome ${requestKind} request recovered after`, state.failureCount, 'failure(s)');
+    }
+
+    state.failureCount = 0;
+    state.backoffUntil = 0;
+  }
+
+  private recordFailure(requestKind: RequestKind) {
+    const state = this.requestStates[requestKind];
+    state.failureCount++;
+
+    if (state.failureCount < this.backoffAfterFailures) {
+      return;
+    }
+
+    const backoffMs = Math.min(
+      this.maxBackoffMs,
+      this.initialBackoffMs * (2 ** (state.failureCount - this.backoffAfterFailures)),
+    );
+    state.backoffUntil = Date.now() + backoffMs;
+    this.log.warn(`WeBeHome ${requestKind} request failed`, state.failureCount,
+      `times; backing off for ${Math.ceil(backoffMs / 1000)} seconds`);
+  }
+
+  private parsePositiveNumber(value: unknown, defaultValue: number): number {
+    const parsedValue = typeof value === 'number' ? value : Number.parseInt(String(value), 10);
+
+    return Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : defaultValue;
   }
 }

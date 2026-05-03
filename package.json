@@ -1,7 +1,7 @@
 {
   "displayName": "WeBeHome",
   "name": "homebridge-webehome",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Homebridge dynamic platform plugin for WeBeHome alarm systems.",
   "license": "Apache-2.0",
   "homepage": "https://github.com/pkempe/homebridge-webehome#readme",

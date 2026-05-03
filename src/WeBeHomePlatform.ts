@@ -4,7 +4,16 @@ import type { API, DynamicPlatformPlugin, Logger,
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings';
 import { SensorAccessory } from './SensorAccessory';
 import { WeBeHomeAPI } from './WeBeHomeAPI';
-import { Sensor, SensorCategory, SensorData, TitleKey, hasParseableDeviceRows, parseAllDeviceData } from './WeBeHomeSensor';
+import {
+  Sensor,
+  SensorCategory,
+  SensorData,
+  TitleKey,
+  hasParseableDeviceRows,
+  parseAllDeviceData,
+  sensorIdentityKey,
+  sensorIdentityKeyFromData,
+} from './WeBeHomeSensor';
 import { SecuritySystemAccessory } from './SecuritySystemAccessory';
 
 /**
@@ -20,7 +29,7 @@ export class WeBeHome implements DynamicPlatformPlugin {
   public readonly accessories: PlatformAccessory[] = [];
 
   private readonly webehomeapi?: WeBeHomeAPI;
-  private readonly sensorAccessories = new Map<number, SensorAccessory>();
+  private readonly sensorAccessories = new Map<string, SensorAccessory>();
   private readonly pollIntervalMs = 30_000;
   private readonly rediscoveryIntervalMs = 300_000;
   private readonly accessRefreshCooldownMs = 5_000;
@@ -29,8 +38,8 @@ export class WeBeHome implements DynamicPlatformPlugin {
   private statusPollTimer?: NodeJS.Timeout;
   private rediscoveryPollTimer?: NodeJS.Timeout;
   private refreshInProgress = false;
-  private readonly sensorAccessRefreshes = new Map<number, Promise<void>>();
-  private readonly sensorAccessRefreshLastAttempt = new Map<number, number>();
+  private readonly sensorAccessRefreshes = new Map<string, Promise<void>>();
+  private readonly sensorAccessRefreshLastAttempt = new Map<string, number>();
   private securitySystemAccessRefresh?: Promise<void>;
   private securitySystemAccessRefreshLastAttempt = 0;
 
@@ -164,10 +173,11 @@ export class WeBeHome implements DynamicPlatformPlugin {
       // loop over the discovered devices and register each one if it has not already been registered
       for (const sensorData of sensorDataArray) {
         const device = new Sensor(this.log, sensorData);
-        const uuid = this.api.hap.uuid.generate(device.suid.toString());
+        const sensorKey = device.identityKey;
+        const uuid = this.api.hap.uuid.generate(sensorKey);
         seenSensorUuids.add(uuid);
 
-        let sensorAccessory = this.sensorAccessories.get(device.suid);
+        let sensorAccessory = this.sensorAccessories.get(sensorKey);
         if (sensorAccessory) {
           sensorAccessory.updateSensor(sensorData);
           continue;
@@ -201,7 +211,7 @@ export class WeBeHome implements DynamicPlatformPlugin {
           this.accessories.push(accessory);
         }
 
-        this.sensorAccessories.set(device.suid, sensorAccessory);
+        this.sensorAccessories.set(sensorKey, sensorAccessory);
         sensorAccessory.updateSensor(sensorData);
       }
 
@@ -225,8 +235,12 @@ export class WeBeHome implements DynamicPlatformPlugin {
 
       let updatedSensors = 0;
       for (const sensorData of sensorDataArray) {
-        const suid = parseInt(sensorData[TitleKey.SUID] || '0');
-        const sensorAccessory = this.sensorAccessories.get(suid);
+        const sensorKey = sensorIdentityKeyFromData(sensorData);
+        if (!sensorKey) {
+          continue;
+        }
+
+        const sensorAccessory = this.sensorAccessories.get(sensorKey);
         if (sensorAccessory) {
           sensorAccessory.updateSensor(sensorData);
           updatedSensors++;
@@ -239,39 +253,39 @@ export class WeBeHome implements DynamicPlatformPlugin {
     }
   }
 
-  async refreshSensor(suid: number, forceRefresh = false): Promise<void> {
-    const sensorAccessory = this.sensorAccessories.get(suid);
+  async refreshSensor(sensorKey: string, forceRefresh = false): Promise<void> {
+    const sensorAccessory = this.sensorAccessories.get(sensorKey);
     if (!sensorAccessory) {
       return;
     }
 
     try {
-      const sensorData = await this.fetchStatusForSensor(suid, forceRefresh);
+      const sensorData = await this.fetchStatusForSensor(sensorKey, forceRefresh);
       if (sensorData) {
         sensorAccessory.updateSensor(sensorData);
       }
     } catch (error) {
-      this.log.error('Failed to refresh sensor:', suid, error);
+      this.log.error('Failed to refresh sensor:', sensorKey, error);
     }
   }
 
-  requestSensorRefresh(suid: number): Promise<void> {
-    const existingRefresh = this.sensorAccessRefreshes.get(suid);
+  requestSensorRefresh(sensorKey: string): Promise<void> {
+    const existingRefresh = this.sensorAccessRefreshes.get(sensorKey);
     if (existingRefresh) {
       return existingRefresh;
     }
 
     const now = Date.now();
-    const lastAttempt = this.sensorAccessRefreshLastAttempt.get(suid) || 0;
+    const lastAttempt = this.sensorAccessRefreshLastAttempt.get(sensorKey) || 0;
     if (now - lastAttempt < this.accessRefreshCooldownMs) {
       return Promise.resolve();
     }
 
-    this.sensorAccessRefreshLastAttempt.set(suid, now);
-    const refresh = this.refreshSensor(suid, true).finally(() => {
-      this.sensorAccessRefreshes.delete(suid);
+    this.sensorAccessRefreshLastAttempt.set(sensorKey, now);
+    const refresh = this.refreshSensor(sensorKey, true).finally(() => {
+      this.sensorAccessRefreshes.delete(sensorKey);
     });
-    this.sensorAccessRefreshes.set(suid, refresh);
+    this.sensorAccessRefreshes.set(sensorKey, refresh);
 
     return refresh;
   }
@@ -371,9 +385,9 @@ export class WeBeHome implements DynamicPlatformPlugin {
     return this.securitySystemAccessRefresh;
   }
 
-  async fetchStatusForSensor(suid: number, forceRefresh = false): Promise<SensorData | null> {
+  async fetchStatusForSensor(sensorKey: string, forceRefresh = false): Promise<SensorData | null> {
     if (!this.webehomeapi) {
-      this.log.warn(`Cannot fetch sensor ${suid}; WeBeHome is not configured.`);
+      this.log.warn(`Cannot fetch sensor ${sensorKey}; WeBeHome is not configured.`);
       return null;
     }
 
@@ -381,15 +395,15 @@ export class WeBeHome implements DynamicPlatformPlugin {
     const data = await this.webehomeapi.fetchStatus(forceRefresh);
 
     if (data === null) {
-      this.log.warn(`No data fetched for sensor ${suid}`);
+      this.log.warn(`No data fetched for sensor ${sensorKey}`);
       return null;
     }
 
     // Parse the server response into an array of device data objects
     const deviceDataArray = parseAllDeviceData(data);
 
-    // Find the device data for the sensor with the given SUID
-    const sensorData = deviceDataArray.find(deviceData => parseInt(deviceData[TitleKey.SUID] || '0') === suid);
+    // Find the device data for the sensor with the given BaseUnitID/SubUnitID pair.
+    const sensorData = deviceDataArray.find(deviceData => sensorIdentityKeyFromData(deviceData) === sensorKey);
 
     return sensorData || null;
   }
@@ -426,6 +440,7 @@ export class WeBeHome implements DynamicPlatformPlugin {
     return deviceDataArray.filter(deviceData =>
       deviceData[TitleKey.DESCR] !== '' &&
       deviceData[TitleKey.DESCR] !== undefined &&
+      sensorIdentityKeyFromData(deviceData) !== undefined &&
       deviceData[TitleKey.CAT] !== undefined &&
       [SensorCategory.ContactSensor, SensorCategory.SmokeDetector]
         .includes(parseInt(deviceData[TitleKey.CAT]!)),
@@ -444,9 +459,9 @@ export class WeBeHome implements DynamicPlatformPlugin {
     this.log.info('Removing stale WeBeHome sensor accessories:', staleAccessories.map(accessory => accessory.displayName).join(', '));
     this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, staleAccessories);
     for (const accessory of staleAccessories) {
-      const suid = this.getSensorSuid(accessory);
-      if (suid !== undefined) {
-        this.sensorAccessories.delete(suid);
+      const sensorKey = this.getSensorKey(accessory);
+      if (sensorKey !== undefined) {
+        this.sensorAccessories.delete(sensorKey);
       }
       this.removeAccessoryFromCache(accessory);
     }
@@ -477,17 +492,31 @@ export class WeBeHome implements DynamicPlatformPlugin {
   }
 
   private isSensorAccessory(accessory: PlatformAccessory): boolean {
-    return this.getSensorSuid(accessory) !== undefined;
+    return this.getSensorKey(accessory) !== undefined;
   }
 
-  private getSensorSuid(accessory: PlatformAccessory): number | undefined {
+  private getSensorKey(accessory: PlatformAccessory): string | undefined {
     const context = accessory.context as Record<string, unknown>;
     const sensor = context.sensor as Record<string, unknown> | undefined;
     const device = context.device as Record<string, unknown> | undefined;
-    const value = sensor?.suid ?? device?.suid;
+    const explicitKey = sensor?.identityKey ?? device?.identityKey;
 
+    if (typeof explicitKey === 'string' && explicitKey.length > 0) {
+      return explicitKey;
+    }
+
+    const buid = this.parseContextNumber(sensor?.buid ?? device?.buid);
+    const suid = this.parseContextNumber(sensor?.suid ?? device?.suid);
+    if (buid !== undefined && suid !== undefined) {
+      return sensorIdentityKey(buid, suid);
+    }
+
+    return undefined;
+  }
+
+  private parseContextNumber(value: unknown): number | undefined {
     if (typeof value === 'number') {
-      return value;
+      return Number.isFinite(value) ? value : undefined;
     }
 
     if (typeof value === 'string') {

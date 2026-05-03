@@ -43,6 +43,21 @@ export enum LowBattery {
 
 export type SensorData = { [key in TitleKey]?: string };
 
+export function sensorIdentityKey(buid: number, suid: number): string {
+  return `${buid}:${suid}`;
+}
+
+export function sensorIdentityKeyFromData(deviceData: SensorData): string | undefined {
+  const buid = parsePositiveIntegerString(deviceData[TitleKey.BUID]);
+  const suid = parsePositiveIntegerString(deviceData[TitleKey.SUID]);
+
+  if (buid === undefined || suid === undefined) {
+    return undefined;
+  }
+
+  return sensorIdentityKey(buid, suid);
+}
+
 export class Sensor {
   buid: number;
   suid: number;
@@ -96,6 +111,8 @@ export class Sensor {
       throw new Error('Insufficient data to update state');
     }
 
+    this.buid = parseInt(deviceData[TitleKey.BUID] || '0');
+    this.suid = parseInt(deviceData[TitleKey.SUID] || '0');
     this.description = deviceData[TitleKey.DESCR] || '';
     this.sensorDescription = deviceData[TitleKey.SDESCR] || '';
     this.readingUpdated = deviceData[TitleKey.ReadingUpdated] || '';
@@ -116,6 +133,10 @@ export class Sensor {
 
   hasLowBattery(): boolean {
     return this.lastSignal === LowBattery.LowBattery;
+  }
+
+  get identityKey(): string {
+    return sensorIdentityKey(this.buid, this.suid);
   }
 
 }
@@ -143,9 +164,18 @@ export function parseAllDeviceData(allDeviceData: string): SensorData[] {
 
 export function hasParseableDeviceRows(deviceDataArray: SensorData[]): boolean {
   return deviceDataArray.some(deviceData =>
+    isPositiveIntegerString(deviceData[TitleKey.BUID]) &&
     isPositiveIntegerString(deviceData[TitleKey.SUID]) &&
     isPositiveIntegerString(deviceData[TitleKey.CAT]),
   );
+}
+
+function parsePositiveIntegerString(value: string | undefined): number | undefined {
+  if (value === undefined || !isPositiveIntegerString(value)) {
+    return undefined;
+  }
+
+  return Number.parseInt(value, 10);
 }
 
 function isPositiveIntegerString(value: string | undefined): boolean {

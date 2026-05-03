@@ -3,6 +3,7 @@ import assert from 'assert/strict';
 
 import { SensorAccessory } from '../src/SensorAccessory';
 import { SecuritySystemAccessory, ServerState } from '../src/SecuritySystemAccessory';
+import { WeBeHome } from '../src/WeBeHomePlatform';
 import {
   ContactSensorState,
   LowBattery,
@@ -144,7 +145,7 @@ class FakeSmokeSensorService extends FakeService {}
 function sensorPlatform() {
   const accessoryInformation = new FakeAccessoryInformationService();
   const services: FakeService[] = [];
-  const requestedRefreshes: number[] = [];
+  const requestedRefreshes: string[] = [];
   const accessory = {
     context: {},
     addService: (service: FakeService) => {
@@ -165,8 +166,8 @@ function sensorPlatform() {
       SmokeSensor: FakeSmokeSensorService,
     },
     log: fakeLog(),
-    requestSensorRefresh: (suid: number) => {
-      requestedRefreshes.push(suid);
+    requestSensorRefresh: (sensorKey: string) => {
+      requestedRefreshes.push(sensorKey);
       return Promise.resolve();
     },
   };
@@ -176,6 +177,62 @@ function sensorPlatform() {
     platform,
     requestedRefreshes,
     services,
+  };
+}
+
+function homebridgeApi() {
+  class FakePlatformAccessory {
+    public readonly context: Record<string, unknown> = {};
+    private readonly accessoryInformation = new FakeAccessoryInformationService();
+    private readonly services: FakeService[] = [];
+
+    constructor(
+      public readonly displayName: string,
+      public readonly UUID: string,
+    ) {
+    }
+
+    addService(service: FakeService) {
+      this.services.push(service);
+    }
+
+    getService(serviceType: unknown) {
+      if (serviceType === FakeAccessoryInformationService) {
+        return this.accessoryInformation;
+      }
+
+      return this.services.find(service => service instanceof (serviceType as typeof FakeService));
+    }
+  }
+
+  const registered: FakePlatformAccessory[] = [];
+  const unregistered: FakePlatformAccessory[] = [];
+  const api = {
+    hap: {
+      uuid: {
+        generate: (value: string) => `uuid:${value}`,
+      },
+      Service: {
+        AccessoryInformation: FakeAccessoryInformationService,
+        ContactSensor: FakeContactSensorService,
+        SmokeSensor: FakeSmokeSensorService,
+      },
+      Characteristic: fakeCharacteristic,
+    },
+    platformAccessory: FakePlatformAccessory,
+    registerPlatformAccessories: (_plugin: string, _platform: string, accessories: FakePlatformAccessory[]) => {
+      registered.push(...accessories);
+    },
+    unregisterPlatformAccessories: (_plugin: string, _platform: string, accessories: FakePlatformAccessory[]) => {
+      unregistered.push(...accessories);
+    },
+    on: () => undefined,
+  };
+
+  return {
+    api,
+    registered,
+    unregistered,
   };
 }
 
@@ -292,7 +349,7 @@ test('SensorAccessory returns cached contact and battery states', () => {
   assert.equal(services.length, 1);
   assert.equal(sensorAccessory.handleContactSensorStateGet(), fakeCharacteristic.ContactSensorState.CONTACT_DETECTED);
   assert.equal(sensorAccessory.handleStatusLowBatteryGet(), fakeCharacteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL);
-  assert.deepEqual(requestedRefreshes, [123, 123]);
+  assert.deepEqual(requestedRefreshes, ['1:123', '1:123']);
 
   sensorAccessory.updateSensor(sensorData({
     [TitleKey.LastSignal]: LowBattery.LowBattery,
@@ -311,6 +368,62 @@ test('SensorAccessory returns cached contact and battery states', () => {
       value: fakeCharacteristic.ContactSensorState.CONTACT_NOT_DETECTED,
     },
   ]);
+});
+
+test('SensorAccessory treats unknown contact states as open', () => {
+  const { accessory, platform, services } = sensorPlatform();
+  const sensor = new Sensor(fakeLog() as never, sensorData({
+    [TitleKey.OperationStatus]: '999',
+  }));
+  const sensorAccessory = new SensorAccessory(platform as never, accessory as never, sensor);
+
+  assert.equal(sensorAccessory.handleContactSensorStateGet(), fakeCharacteristic.ContactSensorState.CONTACT_NOT_DETECTED);
+  assert.deepEqual(services[0].updates.slice(-1), [
+    {
+      characteristic: fakeCharacteristic.ContactSensorState,
+      value: fakeCharacteristic.ContactSensorState.CONTACT_NOT_DETECTED,
+    },
+  ]);
+});
+
+test('WeBeHome keeps sensors with the same SUID on different base units separate', async () => {
+  const { api, registered } = homebridgeApi();
+  const platform = new WeBeHome(fakeLog() as never, {
+    name: 'WeBeHome',
+    login: 'login',
+    password: 'password',
+  } as never, api as never);
+  const response = [
+    'headers',
+    row(sensorData({
+      [TitleKey.BUID]: '1',
+      [TitleKey.SUID]: '10',
+      [TitleKey.DESCR]: 'Base one front door',
+    })),
+    row(sensorData({
+      [TitleKey.BUID]: '2',
+      [TitleKey.SUID]: '10',
+      [TitleKey.DESCR]: 'Base two back door',
+      [TitleKey.OperationStatus]: ContactSensorState.Open,
+    })),
+  ].join('</br>');
+
+  (platform as unknown as { webehomeapi: { fetchStatus: () => Promise<string> } }).webehomeapi = {
+    fetchStatus: async () => response,
+  };
+
+  await platform.discoverSensors(false);
+
+  assert.equal(registered.length, 2);
+  assert.deepEqual(registered.map(accessory => accessory.UUID), [
+    'uuid:1:10',
+    'uuid:2:10',
+  ]);
+  assert.deepEqual(registered.map(accessory => (accessory.context.sensor as Sensor).description), [
+    'Base one front door',
+    'Base two back door',
+  ]);
+  assert.equal((await platform.fetchStatusForSensor('2:10'))?.[TitleKey.DESCR], 'Base two back door');
 });
 
 test('parseSecuritySystemStatus validates and extracts status text', () => {

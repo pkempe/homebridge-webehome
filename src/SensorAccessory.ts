@@ -23,7 +23,7 @@ export class SensorAccessory {
     this.accessory.getService(this.platform.Service.AccessoryInformation)!
       .setCharacteristic(this.platform.Characteristic.Manufacturer, sensor.manufacturer)
       .setCharacteristic(this.platform.Characteristic.Model, sensor.model)
-      .setCharacteristic(this.platform.Characteristic.SerialNumber, sensor.suid.toString());
+      .setCharacteristic(this.platform.Characteristic.SerialNumber, sensor.identityKey);
 
     let serviceExists = false;
     let service: Service;
@@ -34,7 +34,7 @@ export class SensorAccessory {
           serviceExists = true;
           service = this.accessory.getService(this.platform.Service.ContactSensor)!;
         } else {
-          service = new this.platform.Service.ContactSensor(sensor.name, sensor.suid.toString());
+          service = new this.platform.Service.ContactSensor(sensor.name, sensor.identityKey);
         }
 
         service.getCharacteristic(this.platform.Characteristic.ContactSensorState)
@@ -46,7 +46,7 @@ export class SensorAccessory {
           serviceExists = true;
           service = this.accessory.getService(this.platform.Service.SmokeSensor)!;
         } else {
-          service = new this.platform.Service.SmokeSensor(sensor.name, sensor.suid.toString());
+          service = new this.platform.Service.SmokeSensor(sensor.name, sensor.identityKey);
         }
 
         service.getCharacteristic(this.platform.Characteristic.SmokeDetected)
@@ -109,9 +109,16 @@ export class SensorAccessory {
   }
 
   private contactSensorState(): number {
-    return this.sensor.getState() === ContactSensorState.Open ?
-      this.platform.Characteristic.ContactSensorState.CONTACT_NOT_DETECTED :
-      this.platform.Characteristic.ContactSensorState.CONTACT_DETECTED;
+    switch (this.sensor.getState()) {
+      case ContactSensorState.Open:
+        return this.platform.Characteristic.ContactSensorState.CONTACT_NOT_DETECTED;
+      case ContactSensorState.Closed:
+        return this.platform.Characteristic.ContactSensorState.CONTACT_DETECTED;
+      default:
+        this.platform.log.warn('Unknown WeBeHome contact sensor state for', this.sensor.name,
+          this.sensor.getState(), 'treating as open');
+        return this.platform.Characteristic.ContactSensorState.CONTACT_NOT_DETECTED;
+    }
   }
 
   private smokeDetectedState(): number {
@@ -127,7 +134,7 @@ export class SensorAccessory {
   }
 
   private requestFreshState() {
-    void this.platform.requestSensorRefresh(this.sensor.suid);
+    void this.platform.requestSensorRefresh(this.sensor.identityKey);
   }
 
 }
